@@ -1,0 +1,4986 @@
+---
+
+title: "Proyecto"
+author: "JhonRojas_LauraDuque"
+date: "2026-03-01"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+  pdf_document:
+    toc: true
+    toc_depth: 3
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+#quitar los numerales para instalar las librerias
+
+#instalacion de librerias
+#install.packages('tidyverse')
+#install.packages('readxl')
+#install.packages('FactoMineR')
+#install.packages('factoextra')
+#install.packages('cluster')
+#install.packages('NbClust')
+#install.packages('gridExtra')
+#install.packages('corrplot')
+#install.packages('plotly')
+#install.packages('DT')
+#install.packages('pheatmap')
+#install.packages('fmsb')
+#install.packages('visdat')
+#install.packages("ggdendro")
+#install.packages("Hmisc")
+#install.packages("e1071")
+```
+
+
+```{r message=FALSE, warning=FALSE}
+
+# Librerías necesarias
+library(tidyverse)
+library(readxl)
+library(FactoMineR)
+library(factoextra)
+library(cluster)
+library(NbClust)
+library(gridExtra)
+library(corrplot)
+library(plotly)
+library(DT)
+library(pheatmap)
+library(fmsb)
+library(visdat)
+
+```
+
+# 1. LIMPIEZA Y TRANSFORMACION DE LOS DATOS
+
+```{r message=FALSE, warning=FALSE}
+#chunk1.1
+# Cargar datos
+datos_raw <- read_excel("datos/Encuesta_limpia.xlsx")
+
+# Asignar nombres cortos
+nombres_cortos <- c(
+  "empresa", "tipo_estructura", "depto", "ubicacion_extra", "area_acceso",
+  "direccion", "tiempo_actividad", "n_empleados", "lineas_comerciales", "especializacion",
+  "usa_credito", "facil_credito", "valor_cupo", "tiene_presupuesto", "compra_mensual",
+  "prob_recompra", "calidad_vs_precio", "frec_compra", "satis_frecuencia", "frec_urgencias",
+  "infl_descuentos", "recomendaria", "marca_memorable", "marca_memorable_cual", "prod_fidelidad",
+  "prod_fidelidad_cual", "publicidad", "asistencia_tecnica", "n_clientes", "valor_distribuidor",
+  "cond_permanencia", "encuentra_productos", "tiene_alternativas", "tiempo_proveedor",
+  "prod_estrella1", "precio_prod1", "prod_estrella2", "precio_prod2", "prod_estrella3", "precio_prod3",
+  "prod_estrella4", "precio_prod4", "prod_estrella5", "precio_prod5", "vehiculo_propio",
+  "entregas_mes", "ventas_mes", "almacenamiento", "medida_almacen", "tiempo_espera", "tipo_punto_venta"
+)
+
+if (ncol(datos_raw) == length(nombres_cortos)) {
+  colnames(datos_raw) <- nombres_cortos
+} else {
+  colnames(datos_raw) <- nombres_cortos[1:ncol(datos_raw)]
+}
+
+# Verificar estructura inicial
+glimpse(datos_raw)
+```
+
+Eliminar variables no relevantes
+```{r message=FALSE, warning=FALSE}
+
+#chunk 1.2
+# Variables que no aportan al clustering (texto libre, IDs, nombres)
+variables_eliminar <- c(
+  "empresa", "direccion", "marca_memorable_cual", "prod_fidelidad_cual",
+  "prod_estrella1", "prod_estrella2", "prod_estrella3", "prod_estrella4", "prod_estrella5",
+  "precio_prod1", "precio_prod2", "precio_prod3", "precio_prod4", "precio_prod5"
+)
+
+datos_limpios <- datos_raw %>%
+  select(-any_of(variables_eliminar))
+```
+
+Transformacion de variables
+```{r message=FALSE, warning=FALSE}
+#chunk1.3
+datos_limpios <- datos_limpios %>%
+  mutate(
+    # Tiempo en actividad
+    tiempo_actividad_num = case_when(
+      tiempo_actividad == "De 1 a 5 años" ~ 1,
+      tiempo_actividad == "de 5 a 10 años" ~ 2,
+      tiempo_actividad == "10 años en adelante" ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Cupo de crédito
+    valor_cupo_num = case_when(
+      valor_cupo == "Menor a $1'000.000" ~ 1,
+      valor_cupo == "Entre $1'000.000 y $5'000.000" ~ 2,
+      valor_cupo == "Entre $5'000.000 y $10'000.000" ~ 3,
+      valor_cupo == "mayor a  $10'000.000" ~ 4,
+      TRUE ~ NA_real_
+    ),
+    
+    # Compra mensual
+    compra_mensual_num = case_when(
+      compra_mensual == "menos de $500.000" ~ 1,
+      compra_mensual == "entre $500.000 y $1'000.000" ~ 2,
+      compra_mensual == "entre $1'000.000 y $5'000.000" ~ 3,
+      compra_mensual == "entre $5'000.000 y $10'000.000" ~ 4,
+      compra_mensual == "más de $10'000.000" ~ 5,
+      TRUE ~ NA_real_
+    ),
+    
+    # Calidad vs Precio (Likert 1-5)
+    calidad_vs_precio_num = case_when(
+      calidad_vs_precio == "Priorizo totalmente el precio, incluso si la calidad es inferior." ~ 1,
+      calidad_vs_precio == "Le doy más importancia al precio que a la calidad." ~ 2,
+      calidad_vs_precio == "Ambos factores son igual de importantes." ~ 3,
+      calidad_vs_precio == "Le doy más importancia a la calidad que al precio." ~ 4,
+      calidad_vs_precio == "Priorizo totalmente la calidad, incluso si el precio es más alto." ~ 5,
+      TRUE ~ NA_real_
+    ),
+    
+    # Frecuencia de compra
+    frec_compra_num = case_when(
+      frec_compra == "Semanal" ~ 1,
+      frec_compra == "Quincenal" ~ 2,
+      frec_compra == "Mensual" ~ 3,
+      frec_compra == "Trimestral" ~ 4,
+      TRUE ~ 5
+    ),
+    
+    # Frecuencia de urgencias
+    frec_urgencias_num = case_when(
+      frec_urgencias == "Siempre" ~ 1,
+      frec_urgencias == "Frecuentemente" ~ 2,
+      frec_urgencias == "Ocasionalmente" ~ 3,
+      frec_urgencias == "Muy rara vez" ~ 4,
+      frec_urgencias == "Nunca" ~ 5,
+      TRUE ~ NA_real_
+    ),
+    
+    # Tiempo de espera
+    tiempo_espera_num = case_when(
+      tiempo_espera == "1-2 días" ~ 1,
+      tiempo_espera == "2-5 días" ~ 2,
+      tiempo_espera == "5-10 días" ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Variables binarias (Sí/No a 1/0)
+    almacenamiento_num = ifelse(almacenamiento == "Sí", 1, 0),
+    tiene_alternativas_num = ifelse(tiene_alternativas == "Sí", 1, 0),
+    tiene_presupuesto_num = ifelse(tiene_presupuesto == "Sí", 1, 0),
+    prod_fidelidad_num = ifelse(prod_fidelidad == "Sí", 1, 0),
+    marca_memorable_num = ifelse(marca_memorable == "Si", 1, 0),
+    asistencia_tecnica_num = ifelse(asistencia_tecnica == "Si", 1, 0),
+    vehiculo_propio_num = ifelse(vehiculo_propio == "Sí", 1, 0),
+    recomendaria_num = ifelse(recomendaria == "Sí", 1, 0),
+    
+    # Tipo de punto de venta (ordinal: físico=1, virtual=2, ambos=3)
+    tipo_punto_venta_num = case_when(
+      tipo_punto_venta == "Solo punto físico" ~ 1,
+      tipo_punto_venta == "Solo tienda virtual" ~ 2,
+      tipo_punto_venta == "Ambos" ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Escalas numéricas directas
+    facil_credito_num = as.numeric(facil_credito),
+    prob_recompra_num = as.numeric(prob_recompra),
+    infl_descuentos_num = as.numeric(infl_descuentos),
+    encuentra_productos_num = as.numeric(encuentra_productos),
+    satis_frecuencia_num = as.numeric(satis_frecuencia)
+  )
+
+#visualizacion del dataset limpio
+
+datatable(datos_limpios, options = list(pageLength = 20, scrollX = TRUE))
+
+
+```
+
+Tratamiento de variables de opcion multiple
+
+
+
+
+```{r message=FALSE, warning=FALSE}
+#chunk1.4
+# ANÁLISIS DE OPCIONES MÚLTIPLES - PERFIL DEL SUBDISTRIBUIDOR
+# ============================================
+
+
+cat("ANÁLISIS DE PERFIL DE SUBDISTRIBUIDORES\n")
+
+# 1. FUNCIÓN PARA CONTAR OPCIONES
+# --------------------------------
+contar_opciones <- function(texto, nombre_variable) {
+  if (is.na(texto) | texto == "" | texto == "Ninguno" | texto == "Ninguna") {
+    return(0L)  # Devolver integer explícito
+  } else {
+    opciones <- trimws(unlist(strsplit(as.character(texto), ",")))
+    opciones_limpias <- opciones[opciones != "" & !is.na(opciones)]
+    return(length(unique(opciones_limpias)))  # Esto ya es integer
+  }
+}
+
+# 2. APLICAR CONTEO
+# -----------------
+datos_limpios <- datos_limpios %>%
+  rowwise() %>%
+  mutate(
+    num_valores_dist = contar_opciones(valor_distribuidor, "valor_distribuidor"),
+    num_cond_perm = contar_opciones(cond_permanencia, "cond_permanencia"),
+    num_tipos_publicidad = contar_opciones(publicidad, "publicidad"),
+    num_lineas = contar_opciones(lineas_comerciales, "lineas_comerciales")
+  ) %>%
+  ungroup()
+
+# 3. VERIFICACIÓN Y LIMPIEZA DE TIPOS
+# ------------------------------------
+cat(" VERIFICANDO TIPOS DE DATOS...\n")
+
+# Lista de columnas que deben ser numéricas
+columnas_numericas <- c(
+  # Originales numéricas
+  "n_empleados", "facil_credito", "prob_recompra", "satis_frecuencia",
+  "infl_descuentos", "encuentra_productos", "ventas_mes", "medida_almacen",
+  "tiempo_proveedor",
+  
+  # Transformadas numéricas
+  "tiempo_actividad_num", "valor_cupo_num", "compra_mensual_num",
+  "calidad_vs_precio_num", "frec_compra_num", "frec_urgencias_num",
+  "tiempo_espera_num", "almacenamiento_num", "tiene_alternativas_num",
+  "tiene_presupuesto_num", "prod_fidelidad_num", "marca_memorable_num",
+  "asistencia_tecnica_num", "vehiculo_propio_num", "recomendaria_num",
+  "tipo_punto_venta_num", "facil_credito_num", "prob_recompra_num",
+  "infl_descuentos_num", "encuentra_productos_num", "satis_frecuencia_num",
+  
+  # Nuevas variables de conteo
+  "num_valores_dist", "num_cond_perm", "num_tipos_publicidad", "num_lineas"
+)
+
+# Filtrar solo las que existen
+columnas_a_verificar <- intersect(columnas_numericas, names(datos_limpios))
+
+for(col in columnas_a_verificar) {
+  tipo_actual <- class(datos_limpios[[col]])
+  
+  # Si no es numérica, intentar convertir
+  if(!is.numeric(datos_limpios[[col]])) {
+    cat("   ️-", col, "es", paste(tipo_actual, collapse = "/"), "→ convirtiendo a numérico\n")
+    
+    # Intentar conversión
+    nuevo_valor <- suppressWarnings(as.numeric(datos_limpios[[col]]))
+    
+    # Verificar cuántos NAs se crearon
+    nas_nuevos <- sum(is.na(nuevo_valor) & !is.na(datos_limpios[[col]]))
+    if(nas_nuevos > 0) {
+      cat("     •", nas_nuevos, "valores se convirtieron en NA\n")
+    }
+    
+    datos_limpios[[col]] <- nuevo_valor
+  }
+}
+
+# Verificar columnas character
+columnas_character <- c(
+  "tipo_estructura", "depto", "ubicacion_extra", "area_acceso",
+  "tiempo_actividad", "lineas_comerciales", "especializacion",
+  "usa_credito", "valor_cupo", "compra_mensual", "calidad_vs_precio",
+  "frec_compra", "frec_urgencias", "tiempo_espera", "almacenamiento",
+  "tiene_alternativas", "tiene_presupuesto", "prod_fidelidad",
+  "marca_memorable", "publicidad", "asistencia_tecnica", "recomendaria",
+  "vehiculo_propio", "entregas_mes", "tipo_punto_venta",
+  "valor_distribuidor", "cond_permanencia"
+)
+
+columnas_character <- intersect(columnas_character, names(datos_limpios))
+
+for(col in columnas_character) {
+  if(!is.character(datos_limpios[[col]])) {
+    cat("   ️-", col, "no es character → convirtiendo\n")
+    datos_limpios[[col]] <- as.character(datos_limpios[[col]])
+  }
+}
+
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+#chunk 1.5
+# 4. ESTADÍSTICAS DESCRIPTIVAS 
+
+
+cat("ESTADISTICAS DESCRIPTIVAS \n")
+
+
+# Funcion para calcular estadisticas de una variable
+calcular_estadisticas <- function(x, nombre_variable) {
+  tipo <- class(x)[1]
+  n_total <- length(x)
+  n_nulos <- sum(is.na(x))
+  pct_nulos <- round(n_nulos / n_total * 100, 2)
+  n_unicos <- length(unique(x[!is.na(x)]))
+  
+  resultado <- data.frame(
+    Variable = nombre_variable,
+    Tipo = tipo,
+    N = n_total,
+    Nulos = n_nulos,
+    Pct_Nulos = pct_nulos,
+    Unicos = n_unicos,
+    stringsAsFactors = FALSE
+  )
+  
+  if(is.numeric(x)) {
+    x_num <- as.numeric(x)
+    resultado$Media <- round(mean(x_num, na.rm = TRUE), 2)
+    resultado$Mediana <- round(median(x_num, na.rm = TRUE), 2)
+    resultado$Desviacion <- round(sd(x_num, na.rm = TRUE), 2)
+    resultado$Minimo <- round(min(x_num, na.rm = TRUE), 2)
+    resultado$Maximo <- round(max(x_num, na.rm = TRUE), 2)
+    resultado$Rango <- resultado$Maximo - resultado$Minimo
+    resultado$P25 <- round(quantile(x_num, 0.25, na.rm = TRUE), 2)
+    resultado$P75 <- round(quantile(x_num, 0.75, na.rm = TRUE), 2)
+    
+    if(length(unique(x_num[!is.na(x_num)])) > 2) {
+      resultado$Asimetria <- round(e1071::skewness(x_num, na.rm = TRUE), 3)
+      resultado$Curtosis <- round(e1071::kurtosis(x_num, na.rm = TRUE), 3)
+    } else {
+      resultado$Asimetria <- NA
+      resultado$Curtosis <- NA
+    }
+    
+    resultado$Moda <- NA
+    resultado$Moda_Frecuencia <- NA
+    resultado$Valor_Mas_Frecuente <- NA
+    
+  } else {
+    resultado$Media <- NA
+    resultado$Mediana <- NA
+    resultado$Desviacion <- NA
+    resultado$Minimo <- NA
+    resultado$Maximo <- NA
+    resultado$Rango <- NA
+    resultado$P25 <- NA
+    resultado$P75 <- NA
+    resultado$Asimetria <- NA
+    resultado$Curtosis <- NA
+    
+    if(n_unicos > 0 && n_unicos <= 20) {
+      freq_table <- table(x, useNA = "ifany")
+      moda_valor <- names(freq_table)[which.max(freq_table)]
+      moda_frec <- max(freq_table)
+      resultado$Moda <- as.character(moda_valor)
+      resultado$Moda_Frecuencia <- moda_frec
+      resultado$Valor_Mas_Frecuente <- paste0(moda_valor, " (", moda_frec, ")")
+    } else {
+      resultado$Moda <- "Multiples categorias"
+      resultado$Moda_Frecuencia <- n_unicos
+      resultado$Valor_Mas_Frecuente <- paste(n_unicos, "categorias diferentes")
+    }
+  }
+  
+  return(resultado)
+}
+
+# Verificar paquete e1071
+if(!require(e1071)) {
+  install.packages("e1071")
+  library(e1071)
+}
+
+# Calcular estadisticas
+cat("Calculando estadisticas para", ncol(datos_limpios), "variables\n\n")
+
+lista_estadisticas <- list()
+for(i in 1:ncol(datos_limpios)) {
+  nombre_var <- names(datos_limpios)[i]
+  cat("  Procesando:", nombre_var, "\n")
+  lista_estadisticas[[i]] <- calcular_estadisticas(datos_limpios[[i]], nombre_var)
+}
+
+df_estadisticas <- do.call(rbind, lista_estadisticas)
+
+
+# CREAR 3 DATAFRAMES ESPECIALIZADOS
+# ============================================
+
+# Dataframe 1: Variables numericas
+df_numericas <- df_estadisticas %>% 
+  filter(Tipo %in% c("numeric", "integer")) %>%
+  select(Variable, N, Nulos, Pct_Nulos, Media, Mediana, Desviacion, 
+         Minimo, Maximo, Rango, P25, P75, Asimetria, Curtosis) %>%
+  arrange(desc(Media))
+
+# Dataframe 2: Variables categoricas
+df_categoricas <- df_estadisticas %>% 
+  filter(!Tipo %in% c("numeric", "integer")) %>%
+  select(Variable, Tipo, N, Nulos, Pct_Nulos, Unicos, 
+         Moda, Moda_Frecuencia, Valor_Mas_Frecuente) %>%
+  arrange(desc(Unicos))
+
+# Dataframe 3: Variables con problemas de calidad
+df_problemas <- df_estadisticas %>%
+  filter(Nulos > 0 | Unicos == 1) %>%
+  mutate(
+    Problema = case_when(
+      Nulos > 0 & Unicos == 1 ~ "Critico: datos faltantes y sin variabilidad",
+      Nulos > 0 ~ "Advertencia: datos faltantes",
+      Unicos == 1 ~ "Sin variabilidad: todos los valores son iguales",
+      TRUE ~ "Sin problemas"
+    ),
+    Recomendacion = case_when(
+      Nulos > 30 ~ "Considerar eliminar la variable",
+      Nulos > 10 ~ "Requiere imputacion cuidadosa",
+      Nulos > 0 ~ "Puede imputarse con moda o media",
+      Unicos == 1 ~ "Eliminar del analisis",
+      TRUE ~ "Variable OK"
+    )
+  ) %>%
+  select(Variable, Tipo, Nulos, Pct_Nulos, Unicos, Problema, Recomendacion) %>%
+  arrange(desc(Pct_Nulos))
+
+
+# RESUMEN EN CONSOLA
+# ============================================
+
+
+cat("RESUMEN DE CALIDAD DE DATOS\n")
+
+
+cat("TOTALES GENERALES:\n")
+cat("  Total variables analizadas:", nrow(df_estadisticas), "\n")
+cat("  Variables numericas:", nrow(df_numericas), "\n")
+cat("  Variables categoricas:", nrow(df_categoricas), "\n\n")
+
+cat("ALERTAS DE CALIDAD:\n")
+cat("  Variables con datos faltantes:", nrow(df_problemas %>% filter(Nulos > 0)), "\n")
+cat("  Variables sin variabilidad:", nrow(df_problemas %>% filter(Unicos == 1)), "\n")
+cat("  Variables criticas:", nrow(df_problemas %>% filter(Nulos > 0 & Unicos == 1)), "\n\n")
+
+cat("VARIABLES CON MAS DEL 30 POR CIENTO DE DATOS FALTANTES:\n")
+df_mas_30 <- df_problemas %>% filter(Pct_Nulos > 30)
+if(nrow(df_mas_30) > 0) {
+  for(i in 1:nrow(df_mas_30)) {
+    cat("  ", df_mas_30$Variable[i], "-", df_mas_30$Pct_Nulos[i], "% faltantes\n")
+  }
+} else {
+  cat("  Ninguna variable supera el 30 por ciento de datos faltantes\n")
+}
+
+
+# VISTA PREVIA DE LOS DATAFRAMES
+# ============================================
+
+cat("VISTA PREVIA DE DATAFRAMES GENERADOS\n")
+
+cat("DATAFRAME 1: VARIABLES NUMERICAS \n")
+cat("--------------------------------------------------------\n")
+print(head(df_numericas, 62), row.names = FALSE)
+
+cat("\n\nDATAFRAME 2: VARIABLES CATEGORICAS \n")
+cat("--------------------------------------------------------\n")
+print(head(df_categoricas, 62), row.names = FALSE)
+
+cat("\n\nDATAFRAME 3: CONTROL DE CALIDAD\n")
+cat("--------------------------------------------------------\n")
+if(nrow(df_problemas) > 0) {
+  print(df_problemas, row.names = FALSE)
+} else {
+  cat("No se detectaron problemas de calidad en las variables\n")
+}
+
+# GUARDAR RESULTADOS
+# ============================================
+
+if(!dir.exists("resultados_estadisticas")) {
+  dir.create("resultados_estadisticas")
+}
+
+
+#==================
+# Guardar los 3 dataframes en CSV
+write.csv(df_numericas, "resultados_estadisticas/variables_numericas.csv", 
+          row.names = FALSE, fileEncoding = "UTF-8")
+write.csv(df_categoricas, "resultados_estadisticas/variables_categoricas.csv", 
+          row.names = FALSE, fileEncoding = "UTF-8")
+write.csv(df_problemas, "resultados_estadisticas/control_calidad.csv", 
+          row.names = FALSE, fileEncoding = "UTF-8")
+write.csv(df_estadisticas, "resultados_estadisticas/todas_variables.csv", 
+          row.names = FALSE, fileEncoding = "UTF-8")
+
+# Guardar
+#=================
+if(!require(openxlsx)) install.packages("openxlsx")
+library(openxlsx)
+
+wb <- createWorkbook()
+addWorksheet(wb, "Variables Numericas")
+writeData(wb, "Variables Numericas", df_numericas)
+addWorksheet(wb, "Variables Categoricas")
+writeData(wb, "Variables Categoricas", df_categoricas)
+addWorksheet(wb, "Control Calidad")
+writeData(wb, "Control Calidad", df_problemas)
+addWorksheet(wb, "Todas Variables")
+writeData(wb, "Todas Variables", df_estadisticas)
+
+saveWorkbook(wb, "resultados_estadisticas/estadisticas_descriptivas.xlsx", overwrite = TRUE)
+
+
+
+cat("Total de variables analizadas:", nrow(df_estadisticas), "\n")
+cat("Variables numericas:", nrow(df_numericas), "\n")
+cat("Variables categoricas:", nrow(df_categoricas), "\n")
+cat("Variables con problemas detectados:", nrow(df_problemas), "\n")
+```
+
+```{r message=FALSE, warning=FALSE}
+#chunk1.6
+# 4.1 CORRECCION DE VARIABLES CON PROBLEMAS
+
+cat("CORRECCION DE VARIABLES CON PROBLEMAS DE CALIDAD\n")
+
+
+# Definir funcion calcular_moda
+calcular_moda <- function(x, na.rm = TRUE) {
+  if (na.rm) x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA)
+  uniqx <- unique(x)
+  uniqx[which.max(tabulate(match(x, uniqx)))]
+}
+
+#directorio de respaldo
+if(!dir.exists("respaldo")) {
+  dir.create("respaldo")
+}
+
+# Guardar respaldo antes de modificar
+respaldo_datos_limpios <- datos_limpios
+saveRDS(respaldo_datos_limpios, "respaldo/datos_limpios_antes_correccion.rds")
+cat("Respaldo guardado en 'respaldo/datos_limpios_antes_correccion.rds'\n\n")
+
+
+# 1. CORRECCION DE VARIABLE: tiempo_espera_num
+# ============================================
+
+cat("1. VARIABLE: tiempo_espera_num\n")
+cat("   Problema: 1 valor faltante \n")
+
+# Verificar valor faltante
+na_count <- sum(is.na(datos_limpios$tiempo_espera_num))
+cat("   Valores NA antes:", na_count, "\n")
+
+if(na_count > 0) {
+  # Calcular moda para imputar
+  moda_tiempo_espera <- calcular_moda(datos_limpios$tiempo_espera_num, na.rm = TRUE)
+  cat("   Moda calculada:", moda_tiempo_espera, "\n")
+  
+  # Imputar
+  datos_limpios$tiempo_espera_num[is.na(datos_limpios$tiempo_espera_num)] <- moda_tiempo_espera
+  
+  # Verificar resultado
+  na_count_despues <- sum(is.na(datos_limpios$tiempo_espera_num))
+  cat("   Valores NA despues:", na_count_despues, "\n")
+}
+
+
+# 2. CORRECCION DE VARIABLE: ubicacion_extra
+# ============================================
+
+cat("2. VARIABLE: ubicacion_extra\n")
+cat("   Problema: Sin variabilidad (todos los valores son iguales)\n")
+
+# Verificar si la variable existe
+if("ubicacion_extra" %in% names(datos_limpios)) {
+  # Verificar valores unicos
+  valores_unicos <- unique(datos_limpios$ubicacion_extra)
+  cat("   Valores unicos antes:", paste(valores_unicos, collapse = ", "), "\n")
+  cat("   Numero de categorias:", length(valores_unicos), "\n")
+  
+  if(length(valores_unicos) == 1) {
+    cat("   Decision: Eliminar variable del analisis\n")
+    
+    # Eliminar variable
+    datos_limpios <- datos_limpios %>% select(-ubicacion_extra)
+    
+    
+    cat("   Nuevo total de variables:", ncol(datos_limpios), "\n\n")
+  }
+} else {
+  cat("   Variable 'ubicacion_extra' no encontrada en el dataset\n\n")
+}
+
+
+# 3. CORRECCION DE VARIABLE: area_acceso
+# ============================================
+
+cat("3. VARIABLE: area_acceso\n")
+cat("   Problema: Sin variabilidad (todos los valores son iguales)\n")
+
+# Verificar si la variable existe
+if("area_acceso" %in% names(datos_limpios)) {
+  # Verificar valores unicos
+  valores_unicos <- unique(datos_limpios$area_acceso)
+  cat("   Valores unicos antes:", paste(valores_unicos, collapse = ", "), "\n")
+  cat("   Numero de categorias:", length(valores_unicos), "\n")
+  
+  if(length(valores_unicos) == 1) {
+    cat("   Decision: Eliminar variable del analisis\n")
+    
+    # Eliminar variable
+    datos_limpios <- datos_limpios %>% select(-area_acceso)
+    
+    cat("   Nuevo total de variables:", ncol(datos_limpios), "\n\n")
+  }
+} else {
+  cat("   Variable 'area_acceso' no encontrada en el dataset\n\n")
+}
+
+
+# VERIFICACION FINAL
+# ============================================
+
+
+cat("VERIFICACION\n")
+
+# Verificar que no quedan NAs en tiempo_espera_num
+if("tiempo_espera_num" %in% names(datos_limpios)) {
+  nas_tiempo <- sum(is.na(datos_limpios$tiempo_espera_num))
+  cat("Variable 'tiempo_espera_num':", nas_tiempo, "valores NA\n")
+}
+
+# Verificar que las variables eliminadas ya no existen
+if(!"ubicacion_extra" %in% names(datos_limpios)) {
+  cat("Variable 'ubicacion_extra': eliminada correctamente\n")
+} else {
+  cat("Advertencia: 'ubicacion_extra' aun existe\n")
+}
+
+if(!"area_acceso" %in% names(datos_limpios)) {
+  cat("Variable 'area_acceso': eliminada correctamente\n")
+} else {
+  cat("Advertencia: 'area_acceso' aun existe\n")
+}
+
+# Resumen final
+cat("\nResumen de datos despues de correcciones:\n")
+cat("  Total de variables:", ncol(datos_limpios), "\n")
+cat("  Total de observaciones:", nrow(datos_limpios), "\n")
+
+# Guardar datos corregidos
+if(!dir.exists("checkpoints")) {
+  dir.create("checkpoints")
+}
+
+saveRDS(datos_limpios, "checkpoints/datos_limpios_corregidos.rds")
+write.csv(datos_limpios, "checkpoints/datos_limpios_corregidos.csv", row.names = FALSE)
+
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+#chunk1.7
+# 5. VISUALIZACIÓN DE DISTRIBUCIONES
+
+
+# Crear directorio para gráficos
+if(!dir.exists("graficos_distribuciones")) {
+  dir.create("graficos_distribuciones")
+}
+
+
+# 1.VERSIONES ABREVIADAS DE VARIABLES CON TEXTOS LARGOS
+# ============================================
+
+
+# copia de seguridad
+datos_viz <- datos_limpios
+
+# lineas_comerciales 
+if("lineas_comerciales" %in% names(datos_viz)) {
+  datos_viz$lineas_comerciales_abrev <- datos_viz$lineas_comerciales
+  # visualización de las primeras 2 líneas
+  datos_viz$lineas_comerciales_abrev <- sapply(datos_viz$lineas_comerciales, function(x) {
+    if(is.na(x) || x == "") return("Sin datos")
+    partes <- strsplit(as.character(x), ",")[[1]]
+    if(length(partes) <= 2) return(x)
+    paste(paste(trimws(partes[1:2]), collapse = ", "), "...")
+  })
+}
+
+# tiempo_actividad
+if("tiempo_actividad" %in% names(datos_viz)) {
+  datos_viz$tiempo_actividad_abrev <- datos_viz$tiempo_actividad
+  datos_viz$tiempo_actividad_abrev <- case_when(
+    datos_viz$tiempo_actividad == "10 años en adelante" ~ "10+ años",
+    datos_viz$tiempo_actividad == "de 5 a 10 años" ~ "5-10 años",
+    datos_viz$tiempo_actividad == "De 1 a 5 años" ~ "1-5 años",
+    TRUE ~ datos_viz$tiempo_actividad
+  )
+}
+
+# usa_credito
+if("usa_credito" %in% names(datos_viz)) {
+  datos_viz$usa_credito_abrev <- datos_viz$usa_credito
+  datos_viz$usa_credito_abrev <- case_when(
+    datos_viz$usa_credito == "Si, frecuentemente" ~ "Sí, frecuente",
+    datos_viz$usa_credito == "No, prefiere pagar de contado" ~ "No, contado",
+    datos_viz$usa_credito == "Ocasionalmente" ~ "Ocasional",
+    datos_viz$usa_credito == "Siempre utiliza creditos" ~ "Siempre crédito",
+    datos_viz$usa_credito == "No, pero le interesaría acceder a uno" ~ "No, le interesa",
+    TRUE ~ datos_viz$usa_credito
+  )
+}
+
+# valor_cupo
+if("valor_cupo" %in% names(datos_viz)) {
+  datos_viz$valor_cupo_abrev <- datos_viz$valor_cupo
+  datos_viz$valor_cupo_abrev <- case_when(
+    datos_viz$valor_cupo == "mayor a  $10'000.000" ~ "> $10M",
+    datos_viz$valor_cupo == "Entre $5'000.000 y $10'000.000" ~ "$5M - $10M",
+    datos_viz$valor_cupo == "Entre $1'000.000 y $5'000.000" ~ "$1M - $5M",
+    datos_viz$valor_cupo == "Menor a $1'000.000" ~ "< $1M",
+    TRUE ~ datos_viz$valor_cupo
+  )
+}
+
+# compra_mensual
+if("compra_mensual" %in% names(datos_viz)) {
+  datos_viz$compra_mensual_abrev <- datos_viz$compra_mensual
+  datos_viz$compra_mensual_abrev <- case_when(
+    datos_viz$compra_mensual == "más de $10'000.000" ~ "> $10M",
+    datos_viz$compra_mensual == "entre $5'000.000 y $10'000.000" ~ "$5M - $10M",
+    datos_viz$compra_mensual == "entre $1'000.000 y $5'000.000" ~ "$1M - $5M",
+    datos_viz$compra_mensual == "entre $500.000 y $1'000.000" ~ "$500K - $1M",
+    datos_viz$compra_mensual == "menos de $500.000" ~ "< $500K",
+    TRUE ~ datos_viz$compra_mensual
+  )
+}
+
+# calidad_vs_precio
+if("calidad_vs_precio" %in% names(datos_viz)) {
+  datos_viz$calidad_vs_precio_abrev <- datos_viz$calidad_vs_precio
+  datos_viz$calidad_vs_precio_abrev <- case_when(
+    datos_viz$calidad_vs_precio == "Priorizo totalmente la calidad, incluso si el precio es más alto." ~ "Priorizo calidad",
+    datos_viz$calidad_vs_precio == "Le doy más importancia a la calidad que al precio." ~ "Más calidad",
+    datos_viz$calidad_vs_precio == "Ambos factores son igual de importantes." ~ "Ambos igual",
+    datos_viz$calidad_vs_precio == "Le doy más importancia al precio que a la calidad." ~ "Más precio",
+    datos_viz$calidad_vs_precio == "Priorizo totalmente el precio, incluso si la calidad es inferior." ~ "Priorizo precio",
+    TRUE ~ datos_viz$calidad_vs_precio
+  )
+}
+
+# frec_urgencias
+if("frec_urgencias" %in% names(datos_viz)) {
+  datos_viz$frec_urgencias_abrev <- datos_viz$frec_urgencias
+  datos_viz$frec_urgencias_abrev <- case_when(
+    datos_viz$frec_urgencias == "Siempre" ~ "Siempre",
+    datos_viz$frec_urgencias == "Frecuentemente" ~ "Frecuente",
+    datos_viz$frec_urgencias == "Ocasionalmente" ~ "Ocasional",
+    datos_viz$frec_urgencias == "Muy rara vez" ~ "Rara vez",
+    datos_viz$frec_urgencias == "Nunca" ~ "Nunca",
+    TRUE ~ datos_viz$frec_urgencias
+  )
+}
+
+# cond_permanencia
+if("cond_permanencia" %in% names(datos_viz)) {
+  datos_viz$cond_permanencia_abrev <- datos_viz$cond_permanencia
+  # Tomar solo los primeros 20 caracteres o primera categoría
+  datos_viz$cond_permanencia_abrev <- sapply(datos_viz$cond_permanencia, function(x) {
+    if(is.na(x) || x == "") return("Sin datos")
+    partes <- strsplit(as.character(x), ",")[[1]]
+    if(length(partes) <= 1) return(substr(x, 1, 20))
+    paste(trimws(partes[1]), "...")
+  })
+}
+
+# publicidad
+if("publicidad" %in% names(datos_viz)) {
+  datos_viz$publicidad_abrev <- datos_viz$publicidad
+  # Tomar solo la primera categoría
+  datos_viz$publicidad_abrev <- sapply(datos_viz$publicidad, function(x) {
+    if(is.na(x) || x == "") return("Sin datos")
+    partes <- strsplit(as.character(x), ",")[[1]]
+    if(length(partes) <= 1) return(substr(x, 1, 25))
+    paste(trimws(partes[1]), "...")
+  })
+}
+
+#valor_distribuidor
+if("valor_distribuidor" %in% names(datos_viz)) {
+  datos_viz$valor_distribuidor_abrev <- datos_viz$valor_distribuidor
+  # Tomar solo los primeros 20 caracteres
+  datos_viz$valor_distribuidor_abrev <- sapply(datos_viz$valor_distribuidor, function(x) {
+    if(is.na(x) || x == "") return("Sin datos")
+    if(nchar(x) <= 25) return(x)
+    paste(substr(x, 1, 25), "...")
+  })
+}
+
+# 2. DEFINIR LISTAS DE VARIABLES POR TIPO
+
+
+# Variables numéricas originales
+vars_numericas <- datos_viz %>%
+  select(where(is.numeric)) %>%
+  names()
+
+# Variables categóricas con versiones abreviadas
+vars_categoricas_originales <- c(
+  "tipo_estructura", "depto", "especializacion",
+  "lineas_comerciales_abrev", "tiempo_actividad_abrev",
+  "usa_credito_abrev", "valor_cupo_abrev", "compra_mensual_abrev",
+  "calidad_vs_precio_abrev", "frec_urgencias_abrev", "frec_compra",
+  "tipo_punto_venta", "entregas_mes", "tiene_presupuesto",
+  "recomendaria", "marca_memorable", "prod_fidelidad",
+  "asistencia_tecnica", "tiene_alternativas", "vehiculo_propio",
+  "almacenamiento", "cond_permanencia_abrev", "publicidad_abrev",
+  "valor_distribuidor_abrev"
+)
+
+# Filtrar variables que existen
+vars_categoricas <- vars_categoricas_originales[vars_categoricas_originales %in% names(datos_viz)]
+
+# 3. FUNCIÓN PARA CREAR GRÁFICOS
+
+crear_grafico_categorico <- function(datos, variable, nombre_original = NULL) {
+  
+  # Calcular frecuencias
+  freq_table <- as.data.frame(table(datos[[variable]], useNA = "ifany"))
+  names(freq_table) <- c("categoria", "frecuencia")
+  freq_table <- freq_table[!is.na(freq_table$categoria) & freq_table$categoria != "", ]
+  
+  # Limitar a 15 categorías para legibilidad
+  if(nrow(freq_table) > 15) {
+    freq_table <- freq_table[order(-freq_table$frecuencia), ][1:15, ]
+  }
+  
+  # Ordenar por frecuencia descendente
+  freq_table <- freq_table[order(-freq_table$frecuencia), ]
+  
+  # Título del gráfico
+  titulo <- ifelse(is.null(nombre_original), variable, nombre_original)
+  titulo <- gsub("_abrev", "", titulo)
+  
+  # Crear gráfico
+  p <- ggplot(freq_table, aes(x = reorder(categoria, -frecuencia), y = frecuencia)) +
+    geom_bar(stat = "identity", fill = "#2E86AB", color = "white", alpha = 0.85) +
+    geom_text(aes(label = frecuencia), vjust = -0.5, size = 3) +
+    labs(title = titulo,
+         x = "",
+         y = "Frecuencia") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 11, face = "bold", margin = margin(b = 10)),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      axis.text.y = element_text(size = 9),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+  
+  return(p)
+}
+
+crear_grafico_numerico <- function(datos, variable) {
+  p <- ggplot(datos, aes(x = .data[[variable]])) +
+    geom_histogram(bins = 20, fill = "#2E86AB", color = "white", alpha = 0.85) +
+    labs(title = variable,
+         x = variable,
+         y = "Frecuencia") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 11, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      axis.text.y = element_text(size = 9)
+    )
+  
+  return(p)
+}
+
+
+# 4. GENERAR GRÁFICOS POR GRUPOS
+
+
+library(gridExtra)
+
+# Gráficos para variables numéricas
+plots_numericos <- list()
+for(var in vars_numericas) {
+  plots_numericos[[var]] <- crear_grafico_numerico(datos_viz, var)
+}
+
+# Guardar grids de numéricas
+if(length(plots_numericos) > 0) {
+  n_grids <- ceiling(length(plots_numericos) / 9)
+  for(g in 1:n_grids) {
+    inicio <- (g-1)*9 + 1
+    fin <- min(g*9, length(plots_numericos))
+    if(inicio <= length(plots_numericos)) {
+      grid_plot <- do.call(grid.arrange, 
+                          c(plots_numericos[inicio:fin], 
+                            ncol = 3,
+                            top = paste("Variables Numéricas - Grid", g, "de", n_grids)))
+      print(grid_plot)
+      ggsave(paste0("graficos_distribuciones/numericas_grid_", g, ".png"), 
+             grid_plot, width = 12, height = 10, dpi = 150)
+    }
+  }
+}
+
+# Gráficos para variables categóricas
+plots_categoricos <- list()
+for(var in vars_categoricas) {
+  nombre_original <- gsub("_abrev", "", var)
+  plots_categoricos[[var]] <- crear_grafico_categorico(datos_viz, var, nombre_original)
+}
+
+# Guardar grids de categóricas
+if(length(plots_categoricos) > 0) {
+  n_grids <- ceiling(length(plots_categoricos) / 9)
+  for(g in 1:n_grids) {
+    inicio <- (g-1)*9 + 1
+    fin <- min(g*9, length(plots_categoricos))
+    if(inicio <= length(plots_categoricos)) {
+      grid_plot <- do.call(grid.arrange, 
+                          c(plots_categoricos[inicio:fin], 
+                            ncol = 3,
+                            top = paste("Variables Categóricas - Grid", g, "de", n_grids)))
+      print(grid_plot)
+      ggsave(paste0("graficos_distribuciones/categoricas_grid_", g, ".png"), 
+             grid_plot, width = 14, height = 10, dpi = 150)
+    }
+  }
+}
+
+
+# 5. GRÁFICO ESPECÍFICO PARA OPCIONES MÚLTIPLES
+
+cat("\nGenerando gráfico específico para opciones múltiples...\n")
+
+vars_opciones <- c("num_valores_dist", "num_cond_perm", "num_tipos_publicidad", "num_lineas")
+vars_opciones_existentes <- intersect(vars_opciones, names(datos_viz))
+
+if(length(vars_opciones_existentes) > 0) {
+  df_opciones <- datos_viz %>%
+    select(all_of(vars_opciones_existentes)) %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "conteo") %>%
+    mutate(
+      conteo = as.numeric(conteo),
+      variable_nombre = case_when(
+        variable == "num_valores_dist" ~ "Valores del Distribuidor",
+        variable == "num_cond_perm" ~ "Condiciones de Permanencia",
+        variable == "num_tipos_publicidad" ~ "Tipos de Publicidad",
+        variable == "num_lineas" ~ "Líneas Comerciales",
+        TRUE ~ variable
+      )
+    )
+  
+  p_opciones <- ggplot(df_opciones, aes(x = conteo, fill = variable_nombre)) +
+    geom_histogram(binwidth = 1, color = "white", alpha = 0.7) +
+    facet_wrap(~variable_nombre, scales = "free", ncol = 2) +
+    scale_fill_brewer(palette = "Set2") +
+    labs(title = "Distribución de Opciones Múltiples",
+         subtitle = "Cantidad de opciones seleccionadas por subdistribuidor",
+         x = "Número de opciones", 
+         y = "Frecuencia") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(face = "bold", hjust = 0.5, size = 14),
+          plot.subtitle = element_text(hjust = 0.5, size = 11),
+          strip.text = element_text(face = "bold", size = 11))
+  
+  print(p_opciones)
+  ggsave("graficos_distribuciones/opciones_multiples.png", 
+         p_opciones, width = 10, height = 8, dpi = 150)
+}
+
+# 6. RESUMEN
+
+cat("RESUMEN DE VISUALIZACIONES GENERADAS\n")
+
+cat("Gráficos generados:\n")
+cat("  Variables numéricas:", length(vars_numericas), "\n")
+cat("  Variables categóricas:", length(plots_categoricos), "\n")
+cat("  Opciones múltiples:", length(vars_opciones_existentes), "\n\n")
+
+
+
+
+# 7. GUARDAR CHECKPOINT
+
+if(!dir.exists("checkpoints")) dir.create("checkpoints")
+saveRDS(datos_viz, "checkpoints/datos_viz_con_abreviaciones.rds")
+cat("Checkpoint guardado: checkpoints/datos_viz_con_abreviaciones.rds\n")
+```
+
+```{r message=FALSE, warning=FALSE}
+#chunk1.8
+
+#barplor para tiempo_actividad
+ggplot(datos_viz, aes(x = tiempo_actividad_abrev)) +
+  geom_bar(fill = "#2E86AB", color = "white", alpha =
+ 0.85) +
+  labs(title = "Tiempo de Actividad del Subdistribuidor",
+       x = "Tiempo de Actividad",
+       y = "Frecuencia") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 11, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size
+ = 9),
+    axis.text.y = element_text(size = 9)
+  )
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+#chunk1.9
+# 5. VISUALIZACIÓN DE DISTRIBUCIONES
+
+cat("GENERANDO VISUALIZACIONES DE DISTRIBUCIONES\n")
+
+# Crear directorio para gráficos
+if(!dir.exists("graficos_distribuciones")) {
+  dir.create("graficos_distribuciones")
+}
+
+# 1. CREAR DICCIONARIO DE CODIFICACIÓN PARA VARIABLES PROBLEMÁTICAS
+
+datos_viz <- datos_limpios
+
+# Diccionario para almacenar las correspondencias
+diccionario_codigos <- list()
+
+# 1. tipo_estructura
+if("tipo_estructura" %in% names(datos_viz)) {
+  tipos <- sort(unique(datos_viz$tipo_estructura[!is.na(datos_viz$tipo_estructura)]))
+  codigos <- 1:length(tipos)
+  datos_viz$tipo_estructura_cod <- as.numeric(factor(datos_viz$tipo_estructura, levels = tipos))
+  diccionario_codigos$tipo_estructura <- data.frame(
+    Codigo = codigos,
+    Categoria = tipos
+  )
+}
+
+# 2. lineas_comerciales - categoría principal
+if("lineas_comerciales" %in% names(datos_viz)) {
+  get_primera_linea <- function(x) {
+    if(is.na(x) || x == "") return("Sin datos")
+    partes <- trimws(strsplit(as.character(x), ",")[[1]])
+    return(partes[1])
+  }
+  
+  datos_viz$linea_principal <- sapply(datos_viz$lineas_comerciales, get_primera_linea)
+  lineas <- sort(unique(datos_viz$linea_principal[!is.na(datos_viz$linea_principal)]))
+  codigos <- 1:length(lineas)
+  datos_viz$linea_principal_cod <- as.numeric(factor(datos_viz$linea_principal, levels = lineas))
+  diccionario_codigos$lineas_comerciales <- data.frame(
+    Codigo = codigos,
+    Categoria = lineas
+  )
+}
+
+# 3. usa_credito (orden lógico: de menor a mayor uso)
+if("usa_credito" %in% names(datos_viz)) {
+  creditos <- c("No, prefiere pagar de contado", 
+                "No, pero le interesaría acceder a uno",
+                "Ocasionalmente",
+                "Si, frecuentemente",
+                "Siempre utiliza creditos")
+  creditos <- creditos[creditos %in% unique(datos_viz$usa_credito)]
+  codigos <- 1:length(creditos)
+  datos_viz$usa_credito_cod <- as.numeric(factor(datos_viz$usa_credito, levels = creditos))
+  diccionario_codigos$usa_credito <- data.frame(
+    Codigo = codigos,
+    Categoria = creditos
+  )
+}
+
+# 4. calidad_vs_precio (orden lógico: de priorizar precio a priorizar calidad)
+if("calidad_vs_precio" %in% names(datos_viz)) {
+  calidades <- c("Priorizo totalmente el precio, incluso si la calidad es inferior.",
+                 "Le doy más importancia al precio que a la calidad.",
+                 "Ambos factores son igual de importantes.",
+                 "Le doy más importancia a la calidad que al precio.",
+                 "Priorizo totalmente la calidad, incluso si el precio es más alto.")
+  calidades <- calidades[calidades %in% unique(datos_viz$calidad_vs_precio)]
+  codigos <- 1:length(calidades)
+  datos_viz$calidad_vs_precio_cod <- as.numeric(factor(datos_viz$calidad_vs_precio, levels = calidades))
+  diccionario_codigos$calidad_vs_precio <- data.frame(
+    Codigo = codigos,
+    Categoria = calidades
+  )
+}
+
+# 5. tipo_punto_venta
+if("tipo_punto_venta" %in% names(datos_viz)) {
+  puntos <- sort(unique(datos_viz$tipo_punto_venta[!is.na(datos_viz$tipo_punto_venta)]))
+  codigos <- 1:length(puntos)
+  datos_viz$tipo_punto_venta_cod <- as.numeric(factor(datos_viz$tipo_punto_venta, levels = puntos))
+  diccionario_codigos$tipo_punto_venta <- data.frame(
+    Codigo = codigos,
+    Categoria = puntos
+  )
+}
+
+# 6. entregas_mes (orden lógico: de menor a mayor)
+if("entregas_mes" %in% names(datos_viz)) {
+  entregas <- c("menos de 10",
+                "entre 10 a 30 entregas",
+                "entre 30 y 50",
+                "Más de 50 entregas")
+  entregas <- entregas[entregas %in% unique(datos_viz$entregas_mes)]
+  codigos <- 1:length(entregas)
+  datos_viz$entregas_mes_cod <- as.numeric(factor(datos_viz$entregas_mes, levels = entregas))
+  diccionario_codigos$entregas_mes <- data.frame(
+    Codigo = codigos,
+    Categoria = entregas
+  )
+}
+
+# 7. frec_compra (orden lógico: de mayor a menor frecuencia)
+if("frec_compra" %in% names(datos_viz)) {
+  frecuencias <- c("Semanal", "Quincenal", "Mensual", "Trimestral")
+  frecuencias <- frecuencias[frecuencias %in% unique(datos_viz$frec_compra)]
+  codigos <- 1:length(frecuencias)
+  datos_viz$frec_compra_cod <- as.numeric(factor(datos_viz$frec_compra, levels = frecuencias))
+  diccionario_codigos$frec_compra <- data.frame(
+    Codigo = codigos,
+    Categoria = frecuencias
+  )
+}
+
+# 8. frec_urgencias (orden lógico: de mayor a menor)
+if("frec_urgencias" %in% names(datos_viz)) {
+  urgencias <- c("Siempre", "Frecuentemente", "Ocasionalmente", "Muy rara vez", "Nunca")
+  urgencias <- urgencias[urgencias %in% unique(datos_viz$frec_urgencias)]
+  codigos <- 1:length(urgencias)
+  datos_viz$frec_urgencias_cod <- as.numeric(factor(datos_viz$frec_urgencias, levels = urgencias))
+  diccionario_codigos$frec_urgencias <- data.frame(
+    Codigo = codigos,
+    Categoria = urgencias
+  )
+}
+
+
+# 2. FUNCIÓN PARA CREAR GRÁFICOS CON SOLO NÚMEROS
+
+
+crear_grafico_numerico_solo <- function(datos, variable_cod, variable_nombre) {
+  
+  # Calcular frecuencias por código
+  freq_table <- as.data.frame(table(datos[[variable_cod]], useNA = "ifany"))
+  names(freq_table) <- c("codigo", "frecuencia")
+  freq_table <- freq_table[!is.na(freq_table$codigo), ]
+  freq_table$codigo <- as.numeric(as.character(freq_table$codigo))
+  
+  # Orden por código (orden natural)
+  freq_table <- freq_table[order(freq_table$codigo), ]
+  
+  # Convertir código a factor con etiquetas numéricas
+  freq_table$codigo_label <- as.character(freq_table$codigo)
+  
+  # Título limpio
+  titulo <- gsub("_", " ", variable_nombre)
+  titulo <- paste0(toupper(substr(titulo, 1, 1)), substr(titulo, 2, nchar(titulo)))
+  
+  # Crear gráfico con solo números en el eje X
+  p <- ggplot(freq_table, aes(x = codigo_label, y = frecuencia)) +
+    geom_bar(stat = "identity", fill = "#2E86AB", color = "white", alpha = 0.85) +
+    geom_text(aes(label = frecuencia), vjust = -0.5, size = 3.5, fontface = "bold") +
+    labs(title = titulo,
+         x = "Categoría",
+         y = "Frecuencia") +
+    scale_x_discrete(labels = function(x) x) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold", margin = margin(b = 10)),
+      axis.text.x = element_text(size = 11, face = "bold"),
+      axis.text.y = element_text(size = 10),
+      axis.title.x = element_text(size = 10),
+      panel.grid.major.x = element_blank()
+    )
+  
+  return(p)
+}
+
+
+# 3. GENERACION DE GRÁFICOS PARA VARIABLES PROBLEMÁTICAS
+
+
+library(gridExtra)
+
+
+# Lista de variables a visualizar
+variables_codificadas <- list(
+  "tipo_estructura" = "tipo_estructura_cod",
+  "lineas_comerciales" = "linea_principal_cod",
+  "usa_credito" = "usa_credito_cod",
+  "calidad_vs_precio" = "calidad_vs_precio_cod",
+  "tipo_punto_venta" = "tipo_punto_venta_cod",
+  "entregas_mes" = "entregas_mes_cod",
+  "frec_compra" = "frec_compra_cod",
+  "frec_urgencias" = "frec_urgencias_cod"
+)
+
+# Filtro de variables 
+variables_existentes <- names(variables_codificadas)[
+  sapply(variables_codificadas, function(x) x %in% names(datos_viz))
+]
+
+plots_codificados <- list()
+for(var in variables_existentes) {
+  cat("  Procesando:", var, "\n")
+  p <- crear_grafico_numerico_solo(datos_viz, variables_codificadas[[var]], var)
+  if(!is.null(p)) {
+    plots_codificados[[var]] <- p
+  }
+}
+
+# Mostrar en grid
+if(length(plots_codificados) > 0) {
+  ncol_grid <- min(2, length(plots_codificados))
+  nrow_grid <- ceiling(length(plots_codificados) / ncol_grid)
+  
+  grid_codificados <- do.call(grid.arrange, 
+                              c(plots_codificados, 
+                                ncol = ncol_grid,
+                                nrow = nrow_grid,
+                                top = "Distribución de Variables Categóricas"))
+  print(grid_codificados)
+  
+  # Guardar
+  ggsave("graficos_distribuciones/variables_codificadas.png", 
+         grid_codificados, width = 12, height = 3.5 * nrow_grid, dpi = 150)
+}
+
+
+# 4. GENERACION TABLA DE REFERENCIA DE CÓDIGOS
+
+
+
+cat("TABLA DE REFERENCIA DE CÓDIGOS\n")
+
+
+for(var in names(diccionario_codigos)) {
+  cat(paste0("\n", toupper(gsub("_", " ", var)), ":\n"))
+  cat("----------------------------------------\n")
+  dict <- diccionario_codigos[[var]]
+  for(i in 1:nrow(dict)) {
+    # Acortar textos muy largos para la consola
+    texto <- dict$Categoria[i]
+    if(nchar(texto) > 60) {
+      texto <- paste0(substr(texto, 1, 57), "...")
+    }
+    cat(sprintf("  %d. %s\n", dict$Codigo[i], texto))
+  }
+}
+
+
+
+cat("RESUMEN DE CODIFICACIÓN:\n")
+cat("  Total variables codificadas:", length(diccionario_codigos), "\n")
+for(var in names(diccionario_codigos)) {
+  cat(paste0("  - ", var, ": ", nrow(diccionario_codigos[[var]]), " categorías\n"))
+}
+
+
+```
+
+Seleccion de variables para el PCA
+```{r message=FALSE, warning=FALSE}
+#chunk1.10
+# Variables que NO entrarán al PCA (Se usaran para el perfilado)
+vars_descartadas_pca <- c(
+  # Originales textuales (ya transformadas)
+  "tiempo_actividad", "valor_cupo", "compra_mensual", "calidad_vs_precio",
+  "frec_compra", "frec_urgencias", "tiempo_espera", "almacenamiento",
+  "tiene_alternativas", "tiene_presupuesto", "prod_fidelidad", "marca_memorable",
+  "asistencia_tecnica", "vehiculo_propio", "recomendaria", "tipo_punto_venta",
+  "facil_credito", "prob_recompra", "infl_descuentos", "encuentra_productos",
+  "satis_frecuencia",
+  
+  # Categóricas nominales (NO van al PCA)
+  "tipo_estructura", "depto", "ubicacion_extra", "area_acceso",
+  "lineas_comerciales", "especializacion", "usa_credito", "publicidad",
+  "entregas_mes", "valor_distribuidor", "cond_permanencia",
+  
+  # Otras
+  "medida_almacen"
+)
+
+# Variables seleccionadas para PCA
+vars_pca <- setdiff(names(datos_limpios), vars_descartadas_pca)
+
+cat("Variables seleccionadas para PCA:\n")
+print(vars_pca)
+
+# Crear dataset para PCA
+datos_pca <- datos_limpios %>%
+  select(all_of(vars_pca)) %>%
+  # Asegurar que todas sean numéricas
+  mutate(across(everything(), as.numeric))
+
+# Verificar estructura
+glimpse(datos_pca)
+```
+
+# 2. ANALISIS EXPLORATORIO DE LOS DATOS
+
+Exploracion de datos faltantes
+```{r message=FALSE, warning=FALSE}
+
+#chunk 2.1
+
+# Visualizar datos faltantes
+vis_miss(datos_pca)
+
+# Resumen de NAs
+nas_summary <- datos_pca %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "nas") %>%
+  filter(nas > 0) %>%
+  mutate(porcentaje = round(nas / nrow(datos_pca) * 100, 2))
+
+print("Variables con datos faltantes:")
+print(nas_summary)
+```
+
+Imputacion de datos faltantes
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk2.2
+# Función de imputación
+imputar_datos <- function(data) {
+  data_imputada <- data
+  
+  for (col in names(data_imputada)) {
+    if (sum(is.na(data_imputada[[col]])) > 0) {
+      # Para variables con outliers potenciales, usar mediana
+      if (col %in% c("n_clientes", "ventas_mes", "medida_almacen")) {
+        valor_imp <- median(data_imputada[[col]], na.rm = TRUE)
+      } else {
+        # Para el resto, usar media
+        valor_imp <- mean(data_imputada[[col]], na.rm = TRUE)
+      }
+      data_imputada[[col]][is.na(data_imputada[[col]])] <- valor_imp
+    }
+  }
+  return(data_imputada)
+}
+
+datos_completos <- imputar_datos(datos_pca)
+
+# Verificar que no queden NAs
+sum(is.na(datos_completos))
+```
+
+Analisis de outliers
+```{r message=FALSE, warning=FALSE}
+#chunk2.3
+# Boxplots para detectar outliers
+par(mfrow = c(2, 3))
+for (var in names(datos_completos)[1:6]) {
+  boxplot(datos_completos[[var]], main = var, col = "steelblue")
+}
+par(mfrow = c(1, 1))
+```
+
+```{r message=FALSE, warning=FALSE}
+#chunk2.4
+
+# TRATAMIENTO AVANZADO DE OUTLIERS 
+# ============================================
+
+cat("TRATAMIENTO DE OUTLIERS\n")
+cat("========================================================\n\n")
+
+# 1. IDENTIFICACIÓN DETALLADA
+# ============================================
+
+# Función para identificar outliers con diferentes umbrales
+identificar_outliers_avanzado <- function(x, umbral_iqr = 1.5, metodo = "iqr") {
+  if(metodo == "iqr") {
+    q1 <- quantile(x, 0.25, na.rm = TRUE)
+    q3 <- quantile(x, 0.75, na.rm = TRUE)
+    iqr <- q3 - q1
+    lower <- q1 - umbral_iqr * iqr
+    upper <- q3 + umbral_iqr * iqr
+    return(list(es_outlier = x < lower | x > upper, 
+                lower = lower, upper = upper))
+  }
+}
+
+# Clasificar variables problemáticas
+vars_problematicas <- c("n_clientes", "ventas_mes", "n_empleados", 
+                        "medida_almacen", "tiempo_proveedor")
+vars_conteo_problematicas <- c("num_valores_dist", "num_cond_perm", 
+                               "num_tipos_publicidad", "num_lineas")
+vars_ordinales_problematicas <- c("frec_compra_num")
+
+
+
+# Mostrar situación inicial
+for(var in c(vars_problematicas, vars_conteo_problematicas, vars_ordinales_problematicas)) {
+  if(var %in% names(datos_completos)) {
+    outliers_info <- identificar_outliers_avanzado(datos_completos[[var]], umbral_iqr = 1.5)
+    n_out <- sum(outliers_info$es_outlier, na.rm = TRUE)
+    pct_out <- round(n_out / length(datos_completos[[var]]) * 100, 1)
+    
+    if(n_out > 0) {
+      cat(sprintf("  • %s: %d outliers (%.1f%%) - Rango [%.0f, %.0f]\n", 
+                  var, n_out, pct_out, 
+                  min(datos_completos[[var]], na.rm = TRUE),
+                  max(datos_completos[[var]], na.rm = TRUE)))
+    }
+  }
+}
+
+# 2. TRATAMIENTO ESPECÍFICO POR VARIABLE
+# ============================================
+
+cat("\n\n APLICACION DE TRATAMIENTOS ESPECÍFICOS:\n")
+cat("----------------------------------------\n")
+
+datos_mejorados <- datos_completos
+
+# 2.1 Para n_clientes (el outlier de 350,000 es extremo)
+if("n_clientes" %in% names(datos_mejorados)) {
+  # Winsorización más agresiva al 95%
+  q95_clientes <- quantile(datos_mejorados$n_clientes, 0.95, na.rm = TRUE)
+  q05_clientes <- quantile(datos_mejorados$n_clientes, 0.05, na.rm = TRUE)
+  
+  n_original <- sum(datos_mejorados$n_clientes > q95_clientes | 
+                    datos_mejorados$n_clientes < q05_clientes, na.rm = TRUE)
+  
+  datos_mejorados$n_clientes[datos_mejorados$n_clientes > q95_clientes] <- q95_clientes
+  datos_mejorados$n_clientes[datos_mejorados$n_clientes < q05_clientes] <- q05_clientes
+  
+  cat(sprintf("  n_clientes: %d valores extremos → límite superior = %.0f\n", 
+              n_original, q95_clientes))
+}
+
+# 2.2 Para ventas_mes (transformación logarítmica)
+if("ventas_mes" %in% names(datos_mejorados)) {
+  # Verificar si hay ceros o negativos
+  if(min(datos_mejorados$ventas_mes, na.rm = TRUE) > 0) {
+    # Aplicar log
+    ventas_log <- log(datos_mejorados$ventas_mes)
+    
+    # Detectar outliers en escala log
+    outliers_log <- identificar_outliers_avanzado(ventas_log, umbral_iqr = 2.0)
+    
+    if(sum(outliers_log$es_outlier) > 0) {
+      # Winsorizar en escala log
+      q95_log <- quantile(ventas_log, 0.95, na.rm = TRUE)
+      q05_log <- quantile(ventas_log, 0.05, na.rm = TRUE)
+      
+      ventas_log[ventas_log > q95_log] <- q95_log
+      ventas_log[ventas_log < q05_log] <- q05_log
+      
+      # Transformar de vuelta
+      datos_mejorados$ventas_mes <- exp(ventas_log)
+      
+      cat(sprintf("  ventas_mes: transformación logarítmica aplicada\n"))
+    }
+  }
+}
+
+# 2.3 Para n_empleados (winsorización al 90%)
+if("n_empleados" %in% names(datos_mejorados)) {
+  q90_emp <- quantile(datos_mejorados$n_empleados, 0.90, na.rm = TRUE)
+  q10_emp <- quantile(datos_mejorados$n_empleados, 0.10, na.rm = TRUE)
+  
+  n_original <- sum(datos_mejorados$n_empleados > q90_emp | 
+                    datos_mejorados$n_empleados < q10_emp, na.rm = TRUE)
+  
+  datos_mejorados$n_empleados[datos_mejorados$n_empleados > q90_emp] <- q90_emp
+  datos_mejorados$n_empleados[datos_mejorados$n_empleados < q10_emp] <- q10_emp
+  
+  cat(sprintf("  n_empleados: %d valores extremos → límite superior = %.0f\n", 
+              n_original, q90_emp))
+}
+
+# 2.4 Para variables de conteo (límite basado en percentil 95)
+vars_conteo_tratar <- intersect(vars_conteo_problematicas, names(datos_mejorados))
+for(var in vars_conteo_tratar) {
+  q95 <- quantile(datos_mejorados[[var]], 0.95, na.rm = TRUE)
+  n_original <- sum(datos_mejorados[[var]] > q95, na.rm = TRUE)
+  
+  if(n_original > 0) {
+    datos_mejorados[[var]][datos_mejorados[[var]] > q95] <- q95
+    cat(sprintf("  %s: %d valores > percentil 95 → limitados a %.0f\n", 
+                var, n_original, q95))
+  }
+}
+
+# 2.5 Para frec_compra_num (variable ordinal, imputar por moda)
+if("frec_compra_num" %in% names(datos_mejorados)) {
+  # Identificar valores fuera de rango esperado (1-5)
+  valores_validos <- datos_mejorados$frec_compra_num %in% 1:5
+  if(any(!valores_validos, na.rm = TRUE)) {
+    moda_frec <- as.numeric(names(sort(table(datos_mejorados$frec_compra_num[valores_validos]), 
+                                       decreasing = TRUE)[1]))
+    n_original <- sum(!valores_validos, na.rm = TRUE)
+    datos_mejorados$frec_compra_num[!valores_validos] <- moda_frec
+    cat(sprintf("  frec_compra_num: %d valores atípicos → imputados por moda = %.0f\n", 
+                n_original, moda_frec))
+  }
+}
+
+# 3. VERIFICACIÓN POST-TRATAMIENTO
+
+cat("----------------------------------\n")
+
+# Crear dataframes para comparación visual
+df_comparacion <- data.frame()
+
+for(var in c(vars_problematicas, vars_conteo_problematicas)) {
+  if(var %in% names(datos_completos) & var %in% names(datos_mejorados)) {
+    # Antes
+    outliers_antes <- identificar_outliers_avanzado(datos_completos[[var]], umbral_iqr = 1.5)
+    n_antes <- sum(outliers_antes$es_outlier, na.rm = TRUE)
+    
+    # Después
+    outliers_despues <- identificar_outliers_avanzado(datos_mejorados[[var]], umbral_iqr = 1.5)
+    n_despues <- sum(outliers_despues$es_outlier, na.rm = TRUE)
+    
+    df_comparacion <- rbind(df_comparacion, data.frame(
+      Variable = var,
+      Outliers_Antes = n_antes,
+      Outliers_Despues = n_despues,
+      Reduccion = paste0(round((1 - n_despues/n_antes) * 100, 1), "%")
+    ))
+  }
+}
+
+print(df_comparacion)
+
+# 4. VISUALIZACIÓN COMPARATIVA
+# ==============================
+
+par(mfrow = c(2, 3))
+for(var in c("n_clientes", "ventas_mes", "n_empleados", 
+             "num_valores_dist", "frec_compra_num")) {
+  if(var %in% names(datos_completos) & var %in% names(datos_mejorados)) {
+    # Boxplot lado a lado
+    boxplot(datos_completos[[var]], datos_mejorados[[var]],
+            names = c("Original", "Mejorado"),
+            main = var,
+            col = c("lightcoral", "lightgreen"),
+            border = c("darkred", "darkgreen"),
+            outpch = 19,
+            outcol = c("red", "darkgreen"))
+  }
+}
+par(mfrow = c(1, 1))
+
+# 5. ACTUALIZAR DATASET PRINCIPAL
+# =================================
+
+datos_completos <- datos_mejorados
+
+```
+
+
+
+Matriz de correlaciones
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk2.5
+# MATRIZ DE CORRELACIÓN - SOLO VARIABLES NUMÉRICAS
+# ============================================
+
+
+# Crear directorio para checkpoints si no existe
+if(!dir.exists("checkpoints")) {
+  dir.create("checkpoints")
+  cat("Directorio 'checkpoints' creado\n")
+}
+
+# Guardar dataset completo con toda la limpieza aplicada
+saveRDS(datos_completos, "checkpoints/datos_limpios_checkpoint.rds")
+
+# Guardar también en CSV para fácil inspección
+write.csv(datos_completos, "checkpoints/datos_limpios_checkpoint.csv", row.names = FALSE)
+
+
+
+cat("   Dimensiones:", nrow(datos_completos), "x", ncol(datos_completos), "\n")
+cat("   Variables principales:", paste(names(datos_completos)[1:5], collapse = ", "), "...\n\n")
+
+# SELECCIÓN DE VARIABLES NUMÉRICAS
+# ============================================
+
+# Seleccion de numéricas para la matriz de correlación
+datos_numericos <- datos_completos %>% select(where(is.numeric))
+
+cat("MATRIZ DE CORRELACIÓN\n")
+cat("========================================================\n")
+cat("Variables numéricas seleccionadas:", ncol(datos_numericos), "\n")
+cat("Observaciones:", nrow(datos_numericos), "\n\n")
+
+# Verificar que no hay NAs
+if(any(is.na(datos_numericos))) {
+  datos_numericos <- datos_numericos %>%
+    mutate(across(everything(), ~ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+}
+
+# CHECKPOINT 2: GUARDAR DATOS NUMÉRICOS
+# ============================================
+
+saveRDS(datos_numericos, "checkpoints/datos_numericos_checkpoint.rds")
+write.csv(datos_numericos, "checkpoints/datos_numericos_checkpoint.csv", row.names = FALSE)
+
+cat("   Dimensiones numéricas:", nrow(datos_numericos), "x", ncol(datos_numericos), "\n\n")
+
+# MATRIZ DE CORRELACIÓN
+# ============================================
+
+# Calcular matriz de correlación
+cor_matrix <- cor(datos_numericos, use = "complete.obs")
+
+# Visualizacion
+# Identificar variables clave para el negocio
+vars_clave <- c("n_empleados", "n_clientes", "ventas_mes", "compra_mensual_num",
+                "satis_frecuencia_num", "prob_recompra_num", "calidad_vs_precio_num",
+                "num_lineas", "num_valores_dist", "tiempo_proveedor")
+
+# Filtro de variables clave presentes en el dataset numérico
+vars_clave <- intersect(vars_clave, names(datos_numericos))
+
+if(length(vars_clave) >= 3) {
+  cor_matrix_filtrada <- cor(datos_numericos[, vars_clave], use = "complete.obs")
+  
+  # Visualizar
+  corrplot(cor_matrix_filtrada, 
+           method = "color", 
+           type = "upper", 
+           tl.cex = 0.8, 
+           tl.col = "black",
+           tl.srt = 45,
+           addCoef.col = "black",
+           number.cex = 0.7,
+           title = "Matriz de Correlaciones - Variables Clave", 
+           mar = c(0, 0, 2, 0))
+} else {
+  # Si no hay suficientes variables clave, mostrar todas
+  corrplot(cor_matrix, 
+           method = "color", 
+           type = "upper", 
+           tl.cex = 0.6, 
+           tl.col = "black",
+           title = "Matriz de Correlaciones - Todas las Variables", 
+           mar = c(0, 0, 2, 0))
+}
+
+# ANÁLISIS DE CORRELACIONES FUERTES
+# ============================================
+
+cat("\n\n  CORRELACIONES FUERTES (|r| > 0.5):\n")
+cat("----------------------------------------\n")
+
+# Convertir matriz a data frame para análisis
+cor_df <- as.data.frame(as.table(cor_matrix))
+names(cor_df) <- c("Var1", "Var2", "Correlacion")
+cor_df <- cor_df[cor_df$Var1 != cor_df$Var2, ]  # Eliminar diagonal
+cor_df <- cor_df[!duplicated(t(apply(cor_df[,1:2], 1, sort))), ]  # Eliminar duplicados
+
+# Filtrar correlaciones fuertes
+cor_fuertes <- cor_df[abs(cor_df$Correlacion) > 0.5, ]
+cor_fuertes <- cor_fuertes[order(-abs(cor_fuertes$Correlacion)), ]
+
+if(nrow(cor_fuertes) > 0) {
+  print(cor_fuertes)
+  
+  # Interpretación comercial
+  cat("\n\n INTERPRETACIÓN COMERCIAL:\n")
+  
+  for(i in 1:min(5, nrow(cor_fuertes))) {
+    v1 <- as.character(cor_fuertes$Var1[i])
+    v2 <- as.character(cor_fuertes$Var2[i])
+    r <- cor_fuertes$Correlacion[i]
+    
+    cat(sprintf("\n• %s ↔ %s (r = %.3f):\n", v1, v2, r))
+    
+    # Interpretaciones específicas según contexto
+    if(grepl("n_empleados", v1) & grepl("ventas", v2) | 
+       grepl("n_empleados", v2) & grepl("ventas", v1)) {
+      cat("  → A más empleados, mayores ventas (economías de escala)\n")
+    }
+    else if(grepl("n_clientes", v1) & grepl("ventas", v2) | 
+            grepl("n_clientes", v2) & grepl("ventas", v1)) {
+      cat("  → Base de clientes amplia genera mayores ingresos\n")
+    }
+    else if(grepl("satis", v1) & grepl("prob_recompra", v2) | 
+            grepl("satis", v2) & grepl("prob_recompra", v1)) {
+      cat("  → Clientes satisfechos tienen mayor probabilidad de recompra\n")
+    }
+    else if(grepl("num_lineas", v1) & grepl("n_empleados", v2) | 
+            grepl("num_lineas", v2) & grepl("n_empleados", v1)) {
+      cat("  → Mayor diversificación requiere más personal\n")
+    }
+    else if(grepl("calidad", v1) & grepl("precio", v2) | 
+            grepl("calidad", v2) & grepl("precio", v1)) {
+      if(r > 0) {
+        cat("  → Quienes valoran calidad también valoran precio (clientes equilibrados)\n")
+      } else {
+        cat("  → Trade-off entre calidad y precio (clientes definen prioridad)\n")
+      }
+    }
+    else {
+      if(r > 0) {
+        cat("  → Relación POSITIVA: las variables aumentan juntas\n")
+      } else {
+        cat("  → Relación NEGATIVA: cuando una aumenta, la otra disminuye\n")
+      }
+    }
+  }
+} else {
+  cat("No se encontraron correlaciones fuertes (>0.5)\n")
+}
+
+# GUARDAR MATRIZ DE CORRELACIÓN
+# ============================================
+
+write.csv(cor_matrix, "checkpoints/matriz_correlacion.csv")
+cat("\n  Matriz de correlación guardada en 'checkpoints/matriz_correlacion.csv'\n")
+
+# GUARDAR DATASET NUMÉRICO PARA PRÓXIMOS PASOS
+# ============================================
+
+# Actualizar dataset datos_completos 
+datos_completos_numericos <- datos_numericos
+
+cat("\n\n Dataset numérico creado:", ncol(datos_completos_numericos), "variables\n")
+
+```
+En el output se pueden observar algunas correlaciones entre las variables que pueden aportar un importante analisis preliminar para el estudio.
+
+*compra mensual-Valor cupo* al ser la correlacion mas alta es importante hacer un analisis, esta correlacion puede sirgnificar que entre mayor sea el cupo crediticio de los subdistribuidores, mas capacidad de compra pueden tener, por lo que es importante que los almacenes manejen creditos acordes a sus posibilidades
+
+*Valor de cupo, compra mensual y vehiculo propio - tiempo de actividad* estas 3 variables hacen ver que entre mayor sea el tiempo en actividad de los subdistribuidores, mayores posibilidades y recursos pueden disponer ya que saben como se maneja el negocio y no se atienen tanto a la incertidumbre, saben como y cuanto invertir
+
+*compra mensual y cupo de credito- vehiculo propio* aquellos que tienen vehiculo propio pueden tener un credito mas alto y comprar mas ya que tienen un plus en la capacidad operativa y logistica que permite aprovechar ciertos factores como los descuentos por grandes columenes por ejemplo.
+
+*recordar marcas-Fidelidad* el analisis de correlacions dice que probablemente aquellos que recuerdan marcas tienden a serle fiel a alguna
+
+*compra mensual- Años con proveedor* el analisis dice que es muy probable que aquellos subdistribuidores que tienen relacion larga con sus proveedores tieden a comprarles mas
+
+*num empleados-Ventas mensuales* a mayor numero de empleados o mayor tamaño de almacen, mas ventas
+
+
+
+
+
+
+# 3. ANALISIS DE COMPONENTES PRINCIPALES
+
+```{r message=FALSE, warning=FALSE}
+# chunk3.1 PCA con preprocesamiento
+# ============================================
+
+library(caret)
+
+# 1. Separar variables por tipo
+vars_continuas <- c("n_empleados", "n_clientes", "ventas_mes", "tiempo_proveedor")
+vars_ordinales <- c("compra_mensual_num", "calidad_vs_precio_num", "frec_compra_num",
+                    "satis_frecuencia_num", "prob_recompra_num")
+vars_binarias <- c("almacenamiento_num", "tiene_alternativas_num", "tiene_presupuesto_num",
+                   "prod_fidelidad_num", "marca_memorable_num", "vehiculo_propio_num",
+                   "recomendaria_num", "asistencia_tecnica_num")
+
+# 2. Preprocesamiento diferenciado
+datos_prep <- datos_numericos
+
+# Escalar continuas
+datos_prep[vars_continuas] <- scale(datos_prep[vars_continuas])
+
+
+# 3. Aplicar PCA 
+vars_pca <- c(vars_continuas, vars_ordinales)
+vars_pca <- vars_pca[vars_pca %in% names(datos_prep)]
+
+pca_result <- PCA(datos_prep[vars_pca], 
+                  scale.unit = FALSE,  
+                  graph = FALSE,
+                  ncp = min(10, length(vars_pca)))
+
+# 4. Usar componentes que explican al menos 80% de varianza
+var_acum <- cumsum(pca_result$eig[,2])
+ncomp_optimo <- which(var_acum >= 80)[1]
+if(is.na(ncomp_optimo)) ncomp_optimo <- ncol(pca_result$ind$coord)
+
+pca_result <- PCA(datos_prep[vars_pca], 
+                  scale.unit = FALSE,
+                  graph = FALSE,
+                  ncp = ncomp_optimo)
+
+cat("Componentes seleccionados:", ncomp_optimo, "\n")
+cat("Varianza acumulada:", round(var_acum[ncomp_optimo], 1), "%\n")
+```
+
+```{r message=FALSE, warning=FALSE}
+# Grafico de barras de varianza explicada con etiquetas de porcentaje
+varianza_explicada <- pca_result$eig[,2]
+varianza_acumulada <- cumsum(varianza_explicada)
+componentes <- 1:length(varianza_explicada)
+df_varianza <- data.frame(
+  Componente = componentes,
+  Varianza_Explicada = varianza_explicada,
+  Varianza_Acumulada = varianza_acumulada
+)
+ggplot(df_varianza, aes(x = Componente, y = Varianza_Explicada)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  geom_text(aes(label = paste0(round(Varianza_Explicada, 1), "%")), 
+            vjust = -0.5, size = 3) +
+  labs(title = "Varianza Explicada por Componentes Principales",
+       x = "Componente Principal",
+       y = "Varianza Explicada (%)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 12, face = "bold", margin = margin(b = 10)),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10)
+  )
+
+print(paste("Componentes seleccionados:", ncomp_optimo))
+
+```
+
+
+
+Mediante el Análisis de Componentes Principales (PCA) se redujo la dimensionalidad del dataset original, pasando de 21 variables numéricas a 10 componentes principales que retienen aproximdamente el 80% de la varianza total de los datos. Esta reducción permite trabajar en un espacio de menor dimensión que captura la estructura subyacente de los datos, facilitando el análisis de clustering posterior."
+
+
+
+```{r message=FALSE, warning=FALSE}
+# chunk3.2 
+#Tabla de varianza
+# ============================================
+
+# Tabla de varianza
+varianza_df <- data.frame(
+  Componente = 1:nrow(pca_result$eig),
+  Eigenvalue = round(pca_result$eig[,1], 3),
+  Varianza_Individual = round(pca_result$eig[,2], 2),
+  Varianza_Acumulada = round(pca_result$eig[,3], 2)
+)
+
+print(varianza_df)
+
+# Selección: componentes con eigenvalue > 1
+n_componentes_usar <- sum(pca_result$eig[,1] > 1)
+
+# Si da menos de 2, tomar los que explican al menos 80%
+if(n_componentes_usar < 2) {
+  var_acum <- cumsum(pca_result$eig[,2])
+  n_componentes_usar <- which(var_acum >= 80)[1]
+  if(is.na(n_componentes_usar)) n_componentes_usar <- 3
+}
+
+cat("\nComponentes seleccionados:", n_componentes_usar)
+cat("\nVarianza explicada:", round(varianza_df$Varianza_Acumulada[n_componentes_usar], 1), "%\n")
+
+# Guardar para chunks siguientes
+saveRDS(n_componentes_usar, "checkpoints/n_componentes_usar.rds")
+```
+El análisis de componentes principales identificó 5 dimensiones subyacentes que explican el 69.4% de la varianza total de los datos. por otro lado, gracias al criterio del eigenvalue, se designan los primeros  3 componentes que tienen porcentajes moderados (31.87%, 24.25%, 13.28%), ya que cumplen el criterio de Kaiser (eigenvalue > 1), lo que garantiza que retenemos la información más relevante sin introducir ruido.
+
+```{r message=FALSE, warning=FALSE}
+#chunk3.3
+#  Extraer coordenadas
+# ============================================
+
+# Cargar número de componentes
+if(file.exists("checkpoints/n_componentes_usar.rds")) {
+  n_componentes_usar <- readRDS("checkpoints/n_componentes_usar.rds")
+} else {
+  n_componentes_usar <- sum(pca_result$eig[,1] > 1)
+}
+
+# Extraer coordenadas
+datos_pca_coord <- as.data.frame(pca_result$ind$coord[, 1:n_componentes_usar])
+names(datos_pca_coord) <- paste0("PC", 1:n_componentes_usar)
+datos_pca_coord$id <- 1:nrow(datos_pca_coord)
+
+# Dataset para clustering (sin ID)
+datos_cluster <- datos_pca_coord %>% select(-id)
+
+cat("Dimensiones para clustering:", nrow(datos_cluster), "x", ncol(datos_cluster), "\n")
+```
+
+
+
+# 4. CLUSTERING ALGORITMO K-MEANS
+
+## Eleccion de K
+```{r message=FALSE, warning=FALSE}
+#chunk4.1
+
+# NÚMERO ÓPTIMO DE CLUSTERS - 4 MÉTODOS
+
+# Usar solo las coordenadas de PCA para clustering
+datos_cluster <- datos_pca_coord %>% select(-id)
+
+# 1. MÉTODO DEL CODO (ELBOW)
+# ============================================
+set.seed(123)
+wss <- numeric(10)
+for(k in 1:10) {
+  km_temp <- kmeans(datos_cluster, centers = k, nstart = 50, iter.max = 100)
+  wss[k] <- km_temp$tot.withinss
+}
+
+
+# Encontrar punto de codo (método de la segunda derivada)
+diff_wss <- diff(wss)
+diff_diff_wss <- diff(diff_wss)
+k_codo <- which.min(diff_diff_wss) + 1  # +1 por el desplazamiento
+
+df_elbow <- data.frame(k = 1:10, wss = wss)
+
+p_elbow <- ggplot(df_elbow, aes(x = k, y = wss)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_vline(xintercept = k_codo, linetype = "dashed", color = "red", size = 1) +
+  annotate("text", x = k_codo, y = min(wss), 
+           label = paste("k =", k_codo), 
+           color = "red", vjust = -0.5, size = 4) +
+  labs(title = "Método del Codo",
+       subtitle = paste("Punto de inflexión en k =", k_codo),
+       x = "Número de Clusters (k)", 
+       y = "Suma de Cuadrados Intra-clusters") +
+  theme_minimal() +
+  theme(plot.subtitle = element_text(color = "red", face = "bold"))
+
+# 2. MÉTODO DE LA SILUETA PROMEDIO
+# ============================================
+silhouette_scores <- numeric(9)
+for(k in 2:10) {
+  set.seed(123)
+  km_temp <- kmeans(datos_cluster, centers = k, nstart = 50)
+  sil <- silhouette(km_temp$cluster, dist(datos_cluster))
+  silhouette_scores[k-1] <- mean(sil[, 3])
+}
+
+df_sil <- data.frame(k = 2:10, silhouette = silhouette_scores)
+k_silueta <- df_sil$k[which.max(df_sil$silhouette)]
+
+p_sil <- ggplot(df_sil, aes(x = k, y = silhouette)) +
+  geom_line(color = "darkgreen", size = 1) +
+  geom_point(color = "darkgreen", size = 3) +
+  geom_vline(xintercept = k_silueta, linetype = "dashed", color = "red", size = 1) +
+  annotate("text", x = k_silueta, y = max(df_sil$silhouette), 
+           label = paste("k =", k_silueta, "\n(", round(max(df_sil$silhouette), 3), ")"), 
+           color = "red", vjust = -0.5, size = 3.5) +
+  geom_hline(yintercept = 0.5, linetype = "dotted", color = "orange", alpha = 0.7) +
+  labs(title = "Método de la Silueta",
+       subtitle = paste("Máxima silueta en k =", k_silueta),
+       x = "Número de Clusters (k)", 
+       y = "Ancho de Silueta Promedio") +
+  theme_minimal() +
+  theme(plot.subtitle = element_text(color = "red", face = "bold"))
+
+# 3. ESTADÍSTICO GAP
+# ============================================
+set.seed(123)
+gap_stat <- clusGap(datos_cluster, FUN = kmeans, nstart = 50,
+                    K.max = 10, B = 50)
+
+# Extraer datos del gap statistic
+gap_df <- data.frame(
+  k = 1:10,
+  gap = gap_stat$Tab[, "gap"],
+  SE = gap_stat$Tab[, "SE.sim"]
+)
+
+# Encontrar k óptimo (método de Tibshirani)
+k_gap <- with(gap_df, {
+  for(i in 1:(nrow(gap_df)-1)) {
+    if(gap[i] >= gap[i+1] - SE[i+1]) {
+      return(i)
+    }
+  }
+  return(which.max(gap))  # fallback
+})
+
+p_gap <- ggplot(gap_df, aes(x = k, y = gap)) +
+  geom_line(color = "purple", size = 1) +
+  geom_point(color = "purple", size = 3) +
+  geom_errorbar(aes(ymin = gap - SE, ymax = gap + SE), 
+                width = 0.2, color = "gray50", alpha = 0.7) +
+  geom_vline(xintercept = k_gap, linetype = "dashed", color = "red", size = 1) +
+  annotate("text", x = k_gap, y = max(gap_df$gap), 
+           label = paste("k =", k_gap), 
+           color = "red", vjust = -0.5, size = 4) +
+  labs(title = "Estadístico Gap",
+       subtitle = paste("k óptimo =", k_gap, "(método Tibshirani)"),
+       x = "Número de Clusters (k)", 
+       y = "Estadístico Gap") +
+  theme_minimal() +
+  theme(plot.subtitle = element_text(color = "red", face = "bold"))
+
+# 4. NbClust (MÚLTIPLES ÍNDICES)
+# ============================================
+set.seed(123)
+nbclust_result <- NbClust(datos_cluster, distance = "euclidean",
+                          min.nc = 2, max.nc = 8,
+                          method = "kmeans", index = "all")
+
+# Tabla de frecuencias
+frecuencias <- as.data.frame(table(nbclust_result$Best.nc[1,]))
+names(frecuencias) <- c("k", "Frecuencia")
+frecuencias$k <- as.numeric(as.character(frecuencias$k))
+
+# Encontrar k más frecuente
+k_nbclust <- frecuencias$k[which.max(frecuencias$Frecuencia)]
+
+p_nbclust <- ggplot(frecuencias, aes(x = k, y = Frecuencia, fill = factor(k))) +
+  geom_bar(stat = "identity") +
+  geom_vline(xintercept = k_nbclust, linetype = "dashed", color = "red", size = 1) +
+  annotate("text", x = k_nbclust, y = max(frecuencias$Frecuencia), 
+           label = paste("k =", k_nbclust, "\n(", max(frecuencias$Frecuencia), "índices)"), 
+           color = "red", vjust = -0.5, size = 3.5) +
+  labs(title = "NbClust - 26 Índices",
+       subtitle = paste("Moda: k =", k_nbclust),
+       x = "Número de Clusters (k)", 
+       y = "Frecuencia") +
+  theme_minimal() +
+  scale_fill_viridis_d() +
+  theme(plot.subtitle = element_text(color = "red", face = "bold"),
+        legend.position = "none")
+
+# VISUALIZACIÓN COMBINADA
+# ============================================
+grid.arrange(p_elbow, p_sil, p_gap, p_nbclust, ncol = 2, nrow = 2,
+             top = "MÉTODOS PARA DETERMINAR NÚMERO ÓPTIMO DE CLUSTERS")
+
+# TABLA RESUMEN
+# ============================================
+tabla_resumen <- data.frame(
+  Metodo = c("Método del Codo", "Silueta Promedio", "Estadístico Gap", "NbClust (moda)"),
+  k_optimo = c(k_codo, k_silueta, k_gap, k_nbclust),
+  Valor = c(round(wss[k_codo], 0),
+            round(max(df_sil$silhouette), 3),
+            round(max(gap_df$gap), 3),
+            paste0(max(frecuencias$Frecuencia), "/26"))
+)
+
+cat("RESUMEN DE MÉTODOS PARA SELECCIÓN DE k\n")
+cat("========================================\n")
+print(tabla_resumen)
+
+# DECISIÓN 
+# ============================================
+k_mayoria <- as.numeric(names(sort(table(c(k_codo, k_silueta, k_gap, k_nbclust)), 
+                                   decreasing = TRUE)[1]))
+
+cat("DECISIÓN FINAL\n")
+cat("========================================\n")
+cat("Resultados por método:\n")
+cat("  • Método del Codo: k =", k_codo, "\n")
+cat("  • Silueta Promedio: k =", k_silueta, "\n")
+cat("  • Estadístico Gap: k =", k_gap, "\n")
+cat("  • NbClust: k =", k_nbclust, "\n\n")
+
+
+
+```
+Con esto se puede decir que la eleccion de tamaño de k ideal para la segmentación es un topico complejo puesto que se evaluan 4 metodos diferentes y estos arrojan resultados diferentes, por lo que no se llega a un consenso entre los metodos elegidos, mas sin emabrgo se considera que esta decision requiere de un *CRITERIO ANALITICO INFORMADO*, en este caso, es importante entender la esencia de cada uno de los metodos planteados para darles una importancia decisioria y entre los cuatro metodos de eleccion tenemos dos posibles soluciones al problema, optar por el metodo mas frecuente la literatura y el mas robusto el metodo silhouette, sin embargo en este caso como analistas nos inclinamos por el valor de k que arroja el NbClust, ya que este método permite evaluar simultáneamente múltiples índices de validación interna (hasta 30) y seleccionar el valor de k que presenta mayor concordancia entre dichos criterios, reduciendo la subjetividad asociada a la interpretación individual de cada método.
+
+Con esto la eleccion de K=6 se justifica por ser el valor que obtiene la mayoría de los índices evaluados en el método NbClust, lo que sugiere una estructura de clusters más robusta y consistente con la naturaleza de los datos.
+
+Sin embargo para dar mayor rigor metodologico en la eleccion se plantea una evaluacion completa del silhouette para los niveles k del 2 a 10
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk4.2
+# EVALUACIÓN COMPLETA DE SILHOUETTE PARA k = 2 a 10
+# ============================================
+
+
+cat("ANÁLISIS DE SILHOUETTE PARA DIFERENTES NÚMEROS DE CLUSTERS\n")
+cat("========================================================\n\n")
+
+# Usar solo las coordenadas de PCA para clustering
+datos_cluster <- datos_pca_coord %>% select(-id)
+
+# Dataframe para almacenar resultados
+resultados_silhouette <- data.frame(
+  k = 2:10,
+  silhouette_global = NA,
+  min_silhouette = NA,
+  max_silhouette = NA,
+  sd_silhouette = NA,
+  pct_mayor_05 = NA,
+  pct_mayor_03 = NA,
+  pct_negativos = NA,
+  cluster1_size = NA,
+  cluster2_size = NA,
+  cluster3_size = NA,
+  cluster4_size = NA,
+  cluster5_size = NA,
+  cluster6_size = NA,
+  cluster7_size = NA,
+  cluster8_size = NA,
+  cluster9_size = NA,
+  cluster10_size = NA,
+  cluster1_sil = NA,
+  cluster2_sil = NA,
+  cluster3_sil = NA,
+  cluster4_sil = NA,
+  cluster5_sil = NA,
+  cluster6_sil = NA,
+  cluster7_sil = NA,
+  cluster8_sil = NA,
+  cluster9_sil = NA,
+  cluster10_sil = NA
+)
+
+# Evaluar cada k
+for(k in 2:10) {
+  set.seed(123)  # Para reproducibilidad
+  km_temp <- kmeans(datos_cluster, centers = k, nstart = 50, iter.max = 100)
+  
+  # Calcular silhouette
+  dist_matrix <- dist(datos_cluster)
+  sil_temp <- silhouette(km_temp$cluster, dist_matrix)
+  sil_df <- as.data.frame(sil_temp[, 1:3])
+  names(sil_df) <- c("cluster", "neighbor", "sil_width")
+  
+  # Estadísticas globales
+  resultados_silhouette$silhouette_global[k-1] <- mean(sil_df$sil_width)
+  resultados_silhouette$min_silhouette[k-1] <- min(sil_df$sil_width)
+  resultados_silhouette$max_silhouette[k-1] <- max(sil_df$sil_width)
+  resultados_silhouette$sd_silhouette[k-1] <- sd(sil_df$sil_width)
+  
+  # Tamaño de cada cluster
+  tamaños <- table(km_temp$cluster)
+  for(i in 1:length(tamaños)) {
+    col_name <- paste0("cluster", i, "_size")
+    if(col_name %in% names(resultados_silhouette)) {
+      resultados_silhouette[k-1, col_name] <- tamaños[i]
+    }
+  }
+  
+  # Silhouette promedio por cluster
+  sil_por_cluster <- aggregate(sil_width ~ cluster, data = sil_df, FUN = mean)
+  for(i in 1:nrow(sil_por_cluster)) {
+    col_name <- paste0("cluster", sil_por_cluster$cluster[i], "_sil")
+    if(col_name %in% names(resultados_silhouette)) {
+      resultados_silhouette[k-1, col_name] <- sil_por_cluster$sil_width[i]
+    }
+  }
+}
+
+# Mostrar resultados principales
+cat(" RESUMEN DE SILHOUETTE POR NÚMERO DE CLUSTERS:\n")
+cat("------------------------------------------------\n")
+
+resultados_principales <- resultados_silhouette %>%
+  select(k, silhouette_global, min_silhouette, max_silhouette, 
+         pct_mayor_05, pct_mayor_03, pct_negativos) %>%
+  mutate(
+    silhouette_global = round(silhouette_global, 3),
+    min_silhouette = round(min_silhouette, 3),
+    max_silhouette = round(max_silhouette, 3),
+      
+  )
+
+print(resultados_principales)
+
+# INTERPRETACIÓN DE RESULTADOS
+# ============================================
+
+cat("\n\n INTERPRETACIÓN DE LA CALIDAD:\n")
+cat("--------------------------------\n")
+cat("• Silhouette > 0.5: Excelente (clusters bien separados)\n")
+cat("• Silhouette 0.3 - 0.5: Bueno (estructura razonable)\n")
+cat("• Silhouette 0.2 - 0.3: Aceptable (posible superposición)\n")
+cat("• Silhouette < 0.2: Débil (clusters no bien definidos)\n\n")
+
+# Identificar mejor k por silhouette
+mejor_k_sil <- resultados_principales$k[which.max(resultados_principales$silhouette_global)]
+cat(" Mejor k por silhouette global: k =", mejor_k_sil, 
+    "(silhouette =", max(resultados_principales$silhouette_global), ")\n")
+
+# VISUALIZACIÓN DE SILHOUETTE POR K
+# ============================================
+
+# Gráfico de evolución del silhouette
+p_evolucion <- ggplot(resultados_principales, aes(x = k, y = silhouette_global)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_hline(yintercept = c(0.2, 0.3, 0.5), linetype = "dashed", 
+             color = c("orange", "green", "darkgreen"), alpha = 0.5) +
+  annotate("text", x = 9, y = 0.52, label = "Excelente (> 0.5)", 
+           color = "darkgreen", size = 3, hjust = 1) +
+  annotate("text", x = 9, y = 0.32, label = "Bueno (0.3-0.5)", 
+           color = "green", size = 3, hjust = 1) +
+  annotate("text", x = 9, y = 0.22, label = "Aceptable (0.2-0.3)", 
+           color = "orange", size = 3, hjust = 1) +
+  annotate("text", x = 9, y = 0.1, label = "Débil (< 0.2)", 
+           color = "red", size = 3, hjust = 1) +
+  labs(title = "Evolución del Silhouette Global por Número de Clusters",
+       x = "Número de Clusters (k)",
+       y = "Silhouette Promedio") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+print(p_evolucion)
+
+# DETALLE POR CLUSTER PARA CADA K
+# ============================================
+
+cat("\n\n DETALLE POR CLUSTER PARA CADA K:\n")
+cat("------------------------------------\n")
+
+for(k in 2:min(6, 10)) {  # Mostrar hasta k=6 para no saturar
+  cat("\n🔹 k =", k, ":\n")
+  
+  # Tamaños
+  tamaños <- c()
+  sil_values <- c()
+  for(i in 1:k) {
+    size_col <- paste0("cluster", i, "_size")
+    sil_col <- paste0("cluster", i, "_sil")
+    
+    if(size_col %in% names(resultados_silhouette) && 
+       !is.na(resultados_silhouette[k-1, size_col])) {
+      tamaños[i] <- resultados_silhouette[k-1, size_col]
+      sil_values[i] <- resultados_silhouette[k-1, sil_col]
+    }
+  }
+  
+  for(i in 1:k) {
+    cat("   Cluster", i, ": tamaño =", tamaños[i], 
+        "| silhouette =", round(sil_values[i], 3))
+    
+    # Calificación cualitativa
+    if(sil_values[i] > 0.5) {
+      cat(" (Excelente)\n")
+    } else if(sil_values[i] > 0.3) {
+      cat(" (Bueno)\n")
+    } else if(sil_values[i] > 0.2) {
+      cat(" (Aceptable)\n")
+    } else {
+      cat(" (Débil)\n")
+    }
+  }
+}
+
+# EXPORTAR DATAFRAME COMPLETO
+# ============================================
+
+# Guardar dataframe completo
+write.csv(resultados_silhouette, "resultados_silhouette_completo.csv", row.names = FALSE)
+
+cat("\n\n Dataframe guardado como 'resultados_silhouette_completo.csv'\n")
+cat("   Contiene:", ncol(resultados_silhouette), "columnas con estadísticas detalladas\n")
+
+# RECOMENDACIÓN FINAL BASADA EN SILHOUETTE
+# ============================================
+
+cat("RECOMENDACIÓN PARA SELECCIÓN DE k\n")
+cat("========================================================\n")
+
+# Encontrar k con mejor silhouette entre 2 y 5 (rango comercialmente útil)
+k_comerciales <- 3:4
+k_comerciales_validos <- k_comerciales[k_comerciales <= max(resultados_principales$k)]
+sil_comerciales <- resultados_principales$silhouette_global[
+  resultados_principales$k %in% k_comerciales_validos
+]
+
+if(length(sil_comerciales) > 0) {
+  mejor_k_comercial <- k_comerciales_validos[which.max(sil_comerciales)]
+  cat("\n Considerando utilidad comercial (k entre 3 y 5):\n")
+  cat("   Mejor opción: k =", mejor_k_comercial, 
+      "(silhouette =", round(max(sil_comerciales), 3), ")\n\n")
+  
+  # Comparar con el mejor estadístico puro
+  if(mejor_k_comercial != mejor_k_sil) {
+    cat("  Trade-off:\n")
+    cat("   • Comercialmente útil: k =", mejor_k_comercial, "\n")
+    cat("\n Recomendación: Usar k =", mejor_k_sil, 
+        "(balance entre calidad estadística y utilidad comercial)\n")
+  } else {
+    cat(" Coincidencia: El mejor k estadístico también es comercialmente útil\n")
+  }
+}
+```
+
+
+
+Gracias al analisis realizado la eleccion se hace mas robusta y se define k=5 como k ideal para la clusterizacion
+
+```{r message=FALSE, warning=FALSE}
+
+#chun4.3
+k_final <- mejor_k_sil  # Basado en decision 
+
+set.seed(123)
+kmeans_final <- kmeans(datos_cluster, centers = k_final, nstart = 50, iter.max = 100)
+
+# Añadir clusters al dataset
+datos_pca_coord$cluster <- kmeans_final$cluster
+
+# Tamaño de clusters
+table(datos_pca_coord$cluster)
+
+# Visualización
+fviz_cluster(kmeans_final, data = datos_cluster,
+             geom = "point", ellipse.type = "norm",
+             palette = "Set1", ggtheme = theme_minimal(),
+             title = paste("Clustering K-means con k =", k_final))
+```
+
+
+## Validacion avanzada de estabilidad: metodo bootstrap
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk4.4
+# VALIDACIÓN DE CLUSTERS CON BOOTSTRAP
+# ============================================
+
+cat("VALIDACIÓN DE CLUSTERS CON BOOTSTRAP\n")
+cat("========================================================\n\n")
+
+# 1. BOOTSTRAP PARA EVALUAR ESTABILIDAD
+# ========================================
+
+set.seed(123)
+n_bootstrap <- 100
+k_candidatos <- 2:6
+
+estabilidad <- matrix(0, nrow = length(k_candidatos), ncol = 2)
+colnames(estabilidad) <- c("k", "estabilidad_promedio")
+estabilidad[, "k"] <- k_candidatos
+
+cat(" Evaluando estabilidad de clusters con", n_bootstrap, "remuestreos...\n")
+
+for(i in seq_along(k_candidatos)) {
+  k <- k_candidatos[i]
+  indices_ajustados <- numeric(n_bootstrap)
+  
+  for(b in 1:n_bootstrap) {
+    muestra_boot <- sample(1:nrow(datos_cluster), 
+                          size = nrow(datos_cluster), 
+                          replace = TRUE)
+    
+    km_boot <- kmeans(datos_cluster[muestra_boot, ], 
+                      centers = k, 
+                      nstart = 50, 
+                      iter.max = 100)
+    
+    if(k > 1) {
+      dist_boot <- dist(datos_cluster[muestra_boot, ])
+      sil_boot <- silhouette(km_boot$cluster, dist_boot)
+      indices_ajustados[b] <- mean(sil_boot[, 3])
+    }
+  }
+  
+  estabilidad[i, "estabilidad_promedio"] <- mean(indices_ajustados, na.rm = TRUE)
+  cat("  k =", k, ": estabilidad promedio =", 
+      round(estabilidad[i, "estabilidad_promedio"], 3), "\n")
+}
+
+# 2. SILUETA PROMEDIO EN DATOS COMPLETOS
+# =========================================
+
+silueta_completa <- numeric(length(k_candidatos))
+
+for(i in seq_along(k_candidatos)) {
+  k <- k_candidatos[i]
+  set.seed(123)
+  km_temp <- kmeans(datos_cluster, centers = k, nstart = 50, iter.max = 100)
+  sil_temp <- silhouette(km_temp$cluster, dist(datos_cluster))
+  silueta_completa[i] <- mean(sil_temp[, 3])
+}
+
+# 3. INERCIA RELATIVA
+# =====================
+
+wss_valores <- numeric(length(k_candidatos))
+
+for(i in seq_along(k_candidatos)) {
+  k <- k_candidatos[i]
+  set.seed(123)
+  km_temp <- kmeans(datos_cluster, centers = k, nstart = 50, iter.max = 100)
+  wss_valores[i] <- km_temp$tot.withinss
+}
+
+mejora_relativa <- c(NA, 1 - (wss_valores[-1] / wss_valores[-length(wss_valores)]))
+
+# 4. TABLA COMPARATIVA
+# ======================
+
+resultados_validacion <- data.frame(
+  k = k_candidatos,
+  silueta = round(silueta_completa, 3),
+  estabilidad_bootstrap = round(estabilidad[, "estabilidad_promedio"], 3),
+  inercia_total = round(wss_valores, 0),
+  mejora_relativa = round(mejora_relativa * 100, 1)
+)
+
+cat("\n RESULTADOS COMPARATIVOS PARA k = 2 A 6\n")
+cat("========================================================\n")
+print(resultados_validacion)
+
+# 5. IDENTIFICAR CANDIDATOS (SOLO INFORMATIVO, SIN DECISIÓN)
+# ============================================================
+
+cat("\n CANDIDATOS SEGÚN CADA CRITERIO:\n")
+cat("========================================================\n\n")
+
+k_silueta <- k_candidatos[which.max(silueta_completa)]
+k_estable <- k_candidatos[which.max(estabilidad[, "estabilidad_promedio"])]
+puntos_codo <- which(mejora_relativa > 10)
+k_codo <- if(length(puntos_codo) > 0) max(puntos_codo) else NA
+
+cat("  • Máxima silueta (calidad): k =", k_silueta, 
+    "(valor =", round(max(silueta_completa), 3), ")\n")
+cat("  • Máxima estabilidad bootstrap: k =", k_estable,
+    "(valor =", round(max(estabilidad[, "estabilidad_promedio"]), 3), ")\n")
+if(!is.na(k_codo)) {
+  cat("  • Punto de codo: k =", k_codo, "\n")
+} else {
+  cat("  • Punto de codo: No identificado claramente\n")
+}
+
+# 6. TAMAÑO DE CLUSTERS PARA CADA k
+# ===================================
+
+cat("\n TAMAÑO DE CLUSTERS POR k:\n")
+cat("========================================================\n")
+
+for(k in k_candidatos) {
+  set.seed(123)
+  km_temp <- kmeans(datos_cluster, centers = k, nstart = 50, iter.max = 100)
+  tamanos <- table(km_temp$cluster)
+  
+  cat("\n  k =", k, ":\n")
+  for(i in 1:length(tamanos)) {
+    cat("    Cluster", i, ":", tamanos[i], "subdistribuidores\n")
+  }
+}
+
+# 7. VISUALIZACIÓN DE TRADE-OFF
+# ===============================
+
+df_tradeoff <- resultados_validacion %>%
+  select(k, silueta, estabilidad_bootstrap) %>%
+  pivot_longer(cols = -k, names_to = "metrica", values_to = "valor")
+
+p_tradeoff <- ggplot(df_tradeoff, aes(x = k, y = valor, color = metrica, group = metrica)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("silueta" = "darkgreen", "estabilidad_bootstrap" = "purple"),
+                     labels = c("Silueta promedio", "Estabilidad Bootstrap")) +
+  labs(title = "Trade-off: Calidad vs Estabilidad por Número de Clusters",
+       x = "Número de Clusters (k)",
+       y = "Valor de la métrica",
+       color = "Métrica") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5),
+        legend.position = "bottom")
+
+print(p_tradeoff)
+
+# 8. NOTA SOBRE LA DECISIÓN
+# ===========================
+
+cat("\n\n========================================================\n")
+cat(" NOTA SOBRE LA SELECCIÓN DE k\n")
+cat("========================================================\n\n")
+cat(" Los criterios estadísticos sugieren diferentes valores de k:\n")
+cat("   • Silueta maximiza en k =", k_silueta, "\n")
+cat("   • Estabilidad bootstrap maximiza en k =", k_estable, "\n")
+cat("   • Punto de codo sugiere k =", ifelse(!is.na(k_codo), k_codo, "no definido"), "\n")
+cat("\n La decisión final debe considerar:\n")
+cat("   • Calidad estadística (silueta)\n")
+cat("   • Estabilidad ante remuestreo (bootstrap)\n")
+cat("   • Viabilidad comercial (tamaño mínimo de clusters)\n")
+cat("   • Interpretabilidad de los segmentos\n")
+```
+
+Segun los resultados
+
+
+Segun los resultados, despues de usar el metodo del bootstrap para evaluar la estabilidad de los clusters, se observa que el valor de k=5 presenta una estabilidad promedio razonable 0.379, lo que sugiere que esta segmentación es robusta ante variaciones en los datos. Pero, considerando que la elección de K fue arbitraria, desde un razonamiento basado en la eficiencia k=4 presenta una estabilidad promedio SIMILAR o CERCANA de 0.372 vs 0.379 y segun la tesis de Dolnicar (2002) un analisis de cluster menor podria generar valor desde la viabilidad comercial, por lo que a la hora de realizar una estrategia comercial, esta decision desperdiciaria la menor cantidad de recursos por ello se decide analizar el comportamiento de los datos en k=4 como forma de validacion interna
+
+AUNQUE SE ELIGE K=6 COMO VALOR OPTIMO DE NUMERO DE CLUSTERES PARA LA SEGMENTACION GRACIAS AL ANALISIS QUE ARROJO EL BOOTSTRAP, SE HACE TAMBIEM UN ANALISIS CON K=4 PARA TENER UNA  VISION MAS AMPLIA DE LOS RESULTADOS Y VER SI SE OBTIENEN CLUSTERES CON CARACTERISTICAS COMERCIALES DISTINTAS,
+
+ELECCION K=6 POR SER EL VALOR QUE PRESENTA MEJOR ESTABILIDAD EN BOOTSTRAP vs viabilidad comercial
+K=4 POR SER EL VALOR QUE PRESENTA el valor mas cercano al MEJOR SILHOUETTE PROMEDIO y a su vez representa eficiencia comercial.
+
+
+
+## Analisis de sensibilidad del k optimo (evaluamos k=4 y k=6 )
+
+```{r message=FALSE, warning=FALSE}
+# chunk4.5
+# ANÁLISIS DE SENSIBILIDAD - ESCENARIO k = 4
+# ============================================
+
+cat(" ANÁLISIS DE SENSIBILIDAD: ESCENARIO k = 4\n")
+cat("========================================================\n\n")
+
+cat("   • k = 4 agrupa los subdistribuidores en 4 perfiles diferenciados\n")
+cat("   • Permite estrategias comerciales específicas por nicho\n\n")
+
+# 1. APLICAR K-MEANS CON k = 4
+set.seed(123)
+k4_final <- kmeans(datos_cluster, centers = 4, nstart = 100, iter.max = 100)
+
+# 2. CALCULAR SILHOUETTE
+dist_matrix <- dist(datos_cluster)
+sil_k4 <- silhouette(k4_final$cluster, dist_matrix)
+sil_promedio_k4 <- mean(sil_k4[, 3])
+
+cat(" RESULTADOS PARA k = 4:\n")
+cat("-------------------------\n")
+cat("   • Silueta promedio:", round(sil_promedio_k4, 4), "\n")
+cat("   • Calidad: ", 
+    ifelse(sil_promedio_k4 > 0.5, "EXCELENTE",
+           ifelse(sil_promedio_k4 > 0.3, "BUENA",
+                  ifelse(sil_promedio_k4 > 0.2, "ACEPTABLE", "DÉBIL"))), "\n\n")
+
+# 3. TAMAÑO DE CLUSTERS
+cat(" TAMAÑO DE LOS 4 CLUSTERS:\n")
+for(i in 1:4) {
+  tamaño <- sum(k4_final$cluster == i)
+  porcentaje <- round(tamaño / length(k4_final$cluster) * 100, 1)
+  cat("   • Cluster", i, ":", tamaño, "subdistribuidores (", porcentaje, "%)\n")
+}
+
+# 4. VISUALIZACIÓN
+p_k4 <- fviz_cluster(k4_final, data = datos_cluster,
+                     geom = "point", 
+                     ellipse.type = "norm",
+                     palette = "Set1",
+                     ggtheme = theme_minimal(),
+                     main = "Segmentación Óptima: k = 4 (Perfiles Diferenciados)",
+                     subtitle = paste("Silueta promedio:", round(sil_promedio_k4, 3)))
+
+print(p_k4)
+
+# 5. ESTADÍSTICAS POR CLUSTER
+cat("\n\n========================================================\n")
+cat(" CARACTERÍSTICAS PROMEDIO POR CLUSTER (k=4)\n")
+cat("========================================================\n")
+
+datos_temp <- datos_completos
+datos_temp$cluster_k4 <- k4_final$cluster
+
+vars_comparar <- c("n_empleados", "n_clientes", "ventas_mes", 
+                   "compra_mensual_num", "num_lineas")
+
+cat("\n RESULTADOS POR CLUSTER:\n")
+cat("-------------------------\n")
+
+for(var in intersect(vars_comparar, names(datos_temp))) {
+  cat("\n", var, ":\n")
+  stats <- datos_temp %>%
+    group_by(cluster_k4) %>%
+    summarise(media = round(mean(.data[[var]], na.rm = TRUE), 1),
+              mediana = round(median(.data[[var]], na.rm = TRUE), 1),
+              n = n())
+  
+  for(i in 1:4) {
+    cat("   Cluster", i, ": media =", stats$media[i], 
+        "| mediana =", stats$mediana[i], "\n")
+  }
+}
+
+# 6. PERFILES COMERCIALES IDENTIFICADOS
+cat("\n PERFILES COMERCIALES POR CLUSTER (k=4)\n")
+cat("========================================================\n")
+
+order_clusters <- order(table(k4_final$cluster), decreasing = TRUE)
+centroides <- as.data.frame(k4_final$centers)
+centroides$cluster <- 1:4
+
+for(clust in order_clusters) {
+  cat("\n CLUSTER", clust, ":\n")
+  
+  desviaciones <- sapply(names(centroides)[-ncol(centroides)], function(var) {
+    if(var %in% names(datos_cluster)) {
+      media_global <- mean(datos_cluster[[var]], na.rm = TRUE)
+      media_cluster <- centroides[centroides$cluster == clust, var]
+      return((media_cluster - media_global) / media_global * 100)
+    } else {
+      return(NA)
+    }
+  })
+  
+  if(!is.na(desviaciones["n_empleados"]) && desviaciones["n_empleados"] > 50) {
+    cat("    ALTO volumen de empleados\n")
+  } else if(!is.na(desviaciones["n_empleados"]) && desviaciones["n_empleados"] < -30) {
+    cat("    BAJO volumen de empleados\n")
+  }
+  
+  if(!is.na(desviaciones["n_clientes"]) && desviaciones["n_clientes"] > 50) {
+    cat("    AMPLIA cartera de clientes\n")
+  } else if(!is.na(desviaciones["n_clientes"]) && desviaciones["n_clientes"] < -30) {
+    cat("    REDUCIDA cartera de clientes\n")
+  }
+  
+  if(!is.na(desviaciones["ventas_mes"]) && desviaciones["ventas_mes"] > 50) {
+    cat("    ALTO volumen de ventas\n")
+  } else if(!is.na(desviaciones["ventas_mes"]) && desviaciones["ventas_mes"] < -30) {
+    cat("    BAJO volumen de ventas\n")
+  }
+  
+  if(!is.na(desviaciones["compra_mensual_num"]) && desviaciones["compra_mensual_num"] > 50) {
+    cat("    ALTA frecuencia de compra\n")
+  } else if(!is.na(desviaciones["compra_mensual_num"]) && desviaciones["compra_mensual_num"] < -30) {
+    cat("    BAJA frecuencia de compra\n")
+  }
+  
+  if(!is.na(desviaciones["num_lineas"]) && desviaciones["num_lineas"] > 50) {
+    cat("    AMPLIA gama de productos\n")
+  } else if(!is.na(desviaciones["num_lineas"]) && desviaciones["num_lineas"] < -30) {
+    cat("    REDUCIDA gama de productos\n")
+  }
+  
+  tamaño <- sum(k4_final$cluster == clust)
+  cat("    Tamaño:", tamaño, "subdistribuidores (", 
+      round(tamaño / nrow(datos_temp) * 100, 1), "%)\n")
+}
+
+
+```
+Analisis de sensibilidad k=6
+
+```{r message=FALSE, warning=FALSE}
+# chunk4.6
+# ANÁLISIS DE SENSIBILIDAD - ESCENARIO k = 6 Y COMPARACIÓN CON k=4
+# ============================================
+
+cat(" ANÁLISIS DE SENSIBILIDAD: ESCENARIO k = 6\n")
+cat("========================================================\n\n")
+
+cat(" PROPÓSITO: Evaluar una segmentación más detallada (micro-segmentos)\n")
+cat("   • k = 6 divide los 99 subdistribuidores en 6 perfiles más específicos\n")
+cat("   • Útil para estrategias de nicho y marketing personalizado\n")
+cat("   • Riesgo: Posible sobre-segmentación (clusters muy pequeños)\n\n")
+
+# 1. APLICAR K-MEANS CON k = 6
+set.seed(123)
+k6_final <- kmeans(datos_cluster, centers = 6, nstart = 100, iter.max = 100)
+
+# 2. CALCULAR SILHOUETTE
+sil_k6 <- silhouette(k6_final$cluster, dist_matrix)
+sil_promedio_k6 <- mean(sil_k6[, 3])
+
+cat(" RESULTADOS PARA k = 6:\n")
+cat("-------------------------\n")
+cat("   • Silueta promedio:", round(sil_promedio_k6, 4), "\n")
+cat("   • Calidad: ", 
+    ifelse(sil_promedio_k6 > 0.5, "EXCELENTE",
+           ifelse(sil_promedio_k6 > 0.3, "BUENA",
+                  ifelse(sil_promedio_k6 > 0.2, "ACEPTABLE", "DÉBIL"))), "\n\n")
+
+# 3. TAMAÑO DE CLUSTERS
+cat(" TAMAÑO DE LOS 6 CLUSTERS:\n")
+tamanos_k6 <- table(k6_final$cluster)
+for(i in 1:6) {
+  tamaño <- tamanos_k6[i]
+  porcentaje <- round(tamaño / length(k6_final$cluster) * 100, 1)
+  cat("   • Cluster", i, ":", tamaño, "subdistribuidores (", porcentaje, "%)\n")
+  if(tamaño < 10) {
+    cat("       CLUSTER MUY PEQUEÑO - Posible sobre-segmentación\n")
+  }
+}
+
+# 4. VISUALIZACIÓN
+p_k6 <- fviz_cluster(k6_final, data = datos_cluster,
+                     geom = "point", 
+                     ellipse.type = "norm",
+                     palette = "Set3",
+                     ggtheme = theme_minimal(),
+                     main = "Escenario Alternativo: k = 6 (Micro-segmentos)",
+                     subtitle = paste("Silueta promedio:", round(sil_promedio_k6, 3)))
+
+print(p_k6)
+
+# 5. ESTADÍSTICAS POR CLUSTER
+cat("\n CARACTERÍSTICAS PROMEDIO POR CLUSTER (k=6)\n")
+cat("========================================================\n")
+
+datos_temp <- datos_completos
+datos_temp$cluster_k6 <- k6_final$cluster
+
+vars_comparar <- c("n_empleados", "n_clientes", "ventas_mes", 
+                   "compra_mensual_num", "num_lineas")
+
+cat("\n RESULTADOS POR CLUSTER:\n")
+cat("-------------------------\n")
+
+for(var in intersect(vars_comparar, names(datos_temp))) {
+  cat("\n", var, ":\n")
+  stats <- datos_temp %>%
+    group_by(cluster_k6) %>%
+    summarise(media = round(mean(.data[[var]], na.rm = TRUE), 1),
+              mediana = round(median(.data[[var]], na.rm = TRUE), 1))
+  
+  for(i in 1:6) {
+    if(i <= nrow(stats)) {
+      cat("   Cluster", i, ": media =", stats$media[i], 
+          "| mediana =", stats$mediana[i], "\n")
+    }
+  }
+}
+
+# 6. COMPARACIÓN CON k=4 (usando objetos del chunk 4.5)
+# =============================================
+
+cat("\n COMPARACIÓN ENTRE k=4 Y k=6\n")
+cat("========================================================\n\n")
+
+# Verificar que existe k4_final del chunk 4.5
+if(!exists("k4_final")) {
+  stop("Ejecute primero el chunk 4.5 para generar k4_final")
+}
+
+if(!exists("sil_promedio_k4")) {
+  sil_k4 <- silhouette(k4_final$cluster, dist_matrix)
+  sil_promedio_k4 <- mean(sil_k4[, 3])
+}
+
+# Calcular estabilidad bootstrap si no existe
+if(!exists("estab_k4") || !exists("estab_k6")) {
+  cat(" Calculando estabilidad bootstrap para comparación...\n")
+  set.seed(123)
+  n_bootstrap_rapido <- 50
+  estab_rapida_k4 <- numeric(n_bootstrap_rapido)
+  estab_rapida_k6 <- numeric(n_bootstrap_rapido)
+  
+  for(b in 1:n_bootstrap_rapido) {
+    muestra <- sample(1:nrow(datos_cluster), size = nrow(datos_cluster), replace = TRUE)
+    km4 <- kmeans(datos_cluster[muestra, ], centers = 4, nstart = 50)
+    km6 <- kmeans(datos_cluster[muestra, ], centers = 6, nstart = 50)
+    dist_boot <- dist(datos_cluster[muestra, ])
+    estab_rapida_k4[b] <- mean(silhouette(km4$cluster, dist_boot)[, 3])
+    estab_rapida_k6[b] <- mean(silhouette(km6$cluster, dist_boot)[, 3])
+  }
+  estab_k4 <- mean(estab_rapida_k4, na.rm = TRUE)
+  estab_k6 <- mean(estab_rapida_k6, na.rm = TRUE)
+}
+
+cat(" COMPARACIÓN DE MÉTRICAS:\n")
+cat("-------------------------------------------\n")
+cat("   Método           | k=4      | k=6      | Diferencia\n")
+cat("   -------------------------------------------\n")
+cat("   Silueta promedio | ", round(sil_promedio_k4, 4), " | ", 
+    round(sil_promedio_k6, 4), " | ", 
+    round(sil_promedio_k6 - sil_promedio_k4, 4), "\n")
+cat("   Estabilidad boot | ", round(estab_k4, 4), " | ", 
+    round(estab_k6, 4), " | ", 
+    round(estab_k6 - estab_k4, 4), "\n")
+
+# 7. ANÁLISIS DE RENTABILIDAD COMERCIAL
+# ======================================
+
+cat("\n ANÁLISIS DE RENTABILIDAD COMERCIAL\n")
+cat("========================================================\n\n")
+
+total_empresas <- nrow(datos_completos)
+tamano_minimo_viable <- total_empresas * 0.08
+
+cat("   • Total de subdistribuidores:", total_empresas, "\n")
+cat("   • Tamaño mínimo viable por cluster (~8%):", round(tamano_minimo_viable, 0), "\n\n")
+
+clusters_viables <- sum(tamanos_k6 >= tamano_minimo_viable)
+clusters_inviables <- 6 - clusters_viables
+
+if(clusters_inviables == 0) {
+  cat("   TODOS los clusters de k=6 superan el tamaño mínimo viable\n")
+} else if(clusters_inviables <= 2) {
+  cat("   ", clusters_inviables, "cluster(s) NO alcanzan el tamaño mínimo viable\n")
+  cat("   • Riesgo moderado de segmentos no rentables\n")
+} else {
+  cat("   ", clusters_inviables, "clusters NO alcanzan el tamaño mínimo viable\n")
+  cat("   • ALTO RIESGO de sobre-segmentación\n")
+}
+
+# 8. RECOMENDACIÓN FINAL
+# =======================
+
+cat("\n RECOMENDACIÓN FINAL\n")
+cat("========================================================\n\n")
+
+dif_silueta <- abs(sil_promedio_k6 - sil_promedio_k4)
+
+if(dif_silueta < 0.03) {
+  cat(" k=4 y k=6 son ESTADÍSTICAMENTE EQUIVALENTES.\n")
+  cat(" La decisión puede basarse en criterios de interpretabilidad comercial.\n")
+  cat(" → Se recomienda k=4 por su mayor estabilidad y mejor interpretabilidad.\n")
+} else if(sil_promedio_k6 > sil_promedio_k4) {
+  cat(" k=6 tiene MEJOR CALIDAD ESTADÍSTICA.\n")
+  cat(" Sin embargo, presenta clusters pequeños que pueden no ser rentables.\n")
+  cat(" → Se recomienda k=4 como solución de compromiso.\n")
+} else {
+  cat(" k=4 tiene MEJOR CALIDAD ESTADÍSTICA Y ESTABILIDAD.\n")
+  cat(" → hasta este punto, se recomienda k=4 como segmentación óptima.\n")
+}
+```
+
+
+# 5. EVALUACION DEL METODO
+
+## Silhouette k=5
+
+```{r message=FALSE, warning=FALSE}
+#chunk5.1
+
+# EVALUACIÓN DEL CLUSTERING CON SILHOUETTE
+# ============================================
+
+cat(" EVALUACIÓN DEL CLUSTERING CON SILHOUETTE\n")
+cat("========================================================\n\n")
+
+#  1. VERIFICAR QUE TENEMOS LOS OBJETOS NECESARIOS
+# ------------------------------------------------
+
+if(!exists("kmeans_final")) {
+  stop(" No se encuentra kmeans_final.")
+}
+
+if(!exists("datos_cluster")) {
+  if(exists("datos_pca_coord") && "id" %in% names(datos_pca_coord)) {
+    datos_cluster <- datos_pca_coord %>% select(-id)
+    cat("datos_cluster recreado desde datos_pca_coord\n")
+  } else {
+    stop("No se encuentran los datos para calcular silhouette")
+  }
+}
+
+# 2. CALCULAR SILHOUETTE
+# -----------------------
+
+cat(" Calculando silhouette para k =", k_final, "...\n")
+
+# Calcular matriz de distancias
+dist_matrix <- dist(datos_cluster)
+
+# Calcular silhouette
+sil <- silhouette(kmeans_final$cluster, dist_matrix)
+
+# Verificacon del caluclo
+cat("Silhouette calculado correctamente\n")
+cat("   • Dimensiones:", nrow(sil), "x", ncol(sil), "\n")
+cat("   • Silueta promedio global:", round(mean(sil[, 3]), 4), "\n\n")
+
+# 3. CALCULAR ESTADÍSTICAS POR CLUSTER
+# -------------------------------------
+
+#  dataframe para facilitar cálculos
+sil_df <- as.data.frame(sil[, 1:3])
+names(sil_df) <- c("cluster", "neighbor", "sil_width")
+
+# Calculo de estadísticas por cluster
+sil_stats <- sil_df %>%
+  group_by(cluster) %>%
+  summarise(
+    tamaño = n(),
+    silueta_promedio = round(mean(sil_width), 4),
+    silueta_min = round(min(sil_width), 4),
+    silueta_max = round(max(sil_width), 4),
+    pct_positivos = round(mean(sil_width > 0) * 100, 1)
+  ) %>%
+  ungroup()
+
+cat(" Estadísticas por cluster:\n")
+print(as.data.frame(sil_stats))
+
+# 4. GRÁFICO DE SILHOUETTE 
+# ----------------------------------------------
+
+#
+p_sil_ggplot <- ggplot(sil_df, aes(x = reorder(1:nrow(sil_df), sil_width), 
+                                    y = sil_width, 
+                                    fill = as.factor(cluster))) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_hline(yintercept = mean(sil_df$sil_width), 
+             linetype = "dotted", color = "red", size = 0.8) +
+  facet_grid(cluster ~ ., scales = "free_y", space = "free_y") +
+  scale_fill_brewer(palette = "Set1") +
+  coord_flip() +  # horizontal
+  labs(title = "Perfil de Silueta por Cluster",
+       subtitle = paste("Silueta promedio global:", round(mean(sil_df$sil_width), 3),
+                        "| Línea roja punteada = media global"),
+       x = "Observaciones (ordenadas dentro de cada cluster)",
+       y = "Ancho de Silueta",
+       fill = "Cluster") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "darkred")
+  )
+
+print(p_sil_ggplot)
+
+# Versión 2: Usando fviz_silhouette
+p_sil_fviz <- fviz_silhouette(sil, print.summary = FALSE) +
+  coord_flip() +
+  labs(title = "Perfil de Silueta por Cluster (Horizontal)",
+       subtitle = paste("Silueta promedio:", round(mean(sil[, 3]), 3)),
+       x = "Ancho de Silueta", y = "Observaciones") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+
+# Mostrar ambas
+# print(p_sil_fviz)
+
+# 5. MÉTRICAS DE EVALUACIÓN
+# --------------------------
+
+metricas_clustering <- data.frame(
+  Metrica = c("Número de clusters", 
+              "Tamaño mínimo", 
+              "Tamaño máximo",
+              "Silueta promedio global", 
+              "Calidad (Silueta > 0.5)", 
+              "Inercia intra-clusters", 
+              "Inercia explicada",
+              "% de observaciones bien clasificadas (silueta > 0)",
+              "% de observaciones mal clasificadas (silueta < 0)"),
+  
+  Valor = c(k_final,
+            min(kmeans_final$size),
+            max(kmeans_final$size),
+            round(mean(sil[, 3]), 4),
+            paste0(round(mean(sil[, 3] > 0.5) * 100, 1), "%"),
+            round(kmeans_final$tot.withinss, 2),
+            paste0(round(kmeans_final$betweenss / kmeans_final$totss * 100, 1), "%"),
+            paste0(round(mean(sil[, 3] > 0) * 100, 1), "%"),
+            paste0(round(mean(sil[, 3] < 0) * 100, 1), "%"))
+)
+
+# Mostrar tabla
+knitr::kable(metricas_clustering, 
+             caption = "**Métricas de Evaluación del Clustering**",
+             align = c("l", "c"))
+
+# 6. RESUMEN POR CLUSTER 
+# ------------------------------------------
+
+resumen_clusters <- sil_stats %>%
+  mutate(
+    Cluster = cluster,
+    Porcentaje = paste0(round(tamaño / sum(tamaño) * 100, 1), "%"),
+    Interpretacion = case_when(
+      silueta_promedio > 0.5 ~ "Excelente",
+      silueta_promedio > 0.3 ~ "Bueno",
+      silueta_promedio > 0.2 ~ "Aceptable",
+      TRUE ~ "Débil"
+    )
+  ) %>%
+  select(Cluster, Tamaño = tamaño, Porcentaje, 
+         Silueta_Promedio = silueta_promedio, 
+         Min_Silueta = silueta_min,
+         Max_Silueta = silueta_max,
+         `% Positivos` = pct_positivos,
+         Interpretacion)
+
+
+cat(" RESUMEN POR CLUSTER\n")
+cat("========================================================\n\n")
+
+knitr::kable(resumen_clusters, 
+             caption = "**Estadísticas Detalladas por Cluster**",
+             align = c("c", "c", "c", "c", "c", "c", "c", "l"))
+
+# 7. INTERPRETACIÓN DE LA CALIDAD
+# --------------------------------
+
+cat("\n\n INTERPRETACIÓN DE LA CALIDAD:\n")
+cat("--------------------------------\n")
+cat("• Silhouette > 0.5: Excelente (clusters bien separados)\n")
+cat("• Silhouette 0.3 - 0.5: Bueno (estructura razonable)\n")
+cat("• Silhouette 0.2 - 0.3: Aceptable (posible superposición)\n")
+cat("• Silhouette < 0.2: Débil (clusters no bien definidos)\n\n")
+
+# Evaluación cualitativa
+sil_global <- mean(sil[, 3])
+cat(" EVALUACIÓN CUALITATIVA:\n")
+if(sil_global > 0.5) {
+  cat(" EXCELENTE: Los clusters están muy bien definidos y separados\n")
+} else if(sil_global > 0.3) {
+  cat(" BUENA: Estructura de clusters razonable y válida\n")
+} else if(sil_global > 0.2) {
+  cat(" ACEPTABLE: Hay superposición natural pero los clusters son interpretables\n")
+} else {
+  cat(" DÉBIL: Los clusters no están bien definidos, reconsiderar k\n")
+}
+
+# 8. EXPORTAR RESULTADOS
+# -----------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+# Guardar métricas
+write.csv(metricas_clustering, "resultados_finales/metricas_clustering.csv", row.names = FALSE)
+write.csv(resumen_clusters, "resultados_finales/resumen_clusters.csv", row.names = FALSE)
+
+# Guardar el objeto sil para uso futuro
+saveRDS(sil, "resultados_finales/silhouette_object.rds")
+
+```
+
+## Silhouette k=6
+```{r message=FALSE, warning=FALSE}
+#chunk5.2
+
+# EVALUACIÓN DEL CLUSTERING CON SILHOUETTE (k=6)
+# ============================================
+
+
+cat(" EVALUACIÓN DEL CLUSTERING CON SILHOUETTE (k=6)\n")
+cat("========================================================\n\n")
+
+# 1. VERIFICACION DE OBJETOS NECESARIOS
+# ------------------------------------------------
+
+if(!exists("k6_final")) {
+  # Si no existe, ejecutar k-means con k=6
+  cat(" Generando clustering con k=6...\n")
+  set.seed(123)
+  k6_final <- kmeans(datos_cluster, centers = 6, nstart = 100, iter.max = 100)
+  cat(" Clustering con k=6 generado exitosamente\n\n")
+}
+
+if(!exists("datos_cluster")) {
+  if(exists("datos_pca_coord") && "id" %in% names(datos_pca_coord)) {
+    datos_cluster <- datos_pca_coord %>% select(-id)
+    cat("datos_cluster recreado desde datos_pca_coord\n")
+  } else {
+    stop("No se encuentran los datos para calcular silhouette")
+  }
+}
+
+# 2. CALCULAR SILHOUETTE
+# -----------------------
+
+cat(" Calculando silhouette para k = 6...\n")
+
+# Calcular matriz de distancias
+dist_matrix <- dist(datos_cluster)
+
+# Calcular silhouette
+sil_k6 <- silhouette(k6_final$cluster, dist_matrix)
+
+# Verificar que se calculó correctamente
+cat("Silhouette calculado correctamente\n")
+cat("   • Dimensiones:", nrow(sil_k6), "x", ncol(sil_k6), "\n")
+cat("   • Silueta promedio global:", round(mean(sil_k6[, 3]), 4), "\n\n")
+
+# 3. CALCULAR ESTADÍSTICAS POR CLUSTER
+# -------------------------------------
+
+# Convertir a dataframe para facilitar cálculos
+sil_df <- as.data.frame(sil_k6[, 1:3])
+names(sil_df) <- c("cluster", "neighbor", "sil_width")
+
+# Calcular estadísticas por cluster
+sil_stats <- sil_df %>%
+  group_by(cluster) %>%
+  summarise(
+    tamaño = n(),
+    silueta_promedio = round(mean(sil_width), 4),
+    silueta_min = round(min(sil_width), 4),
+    silueta_max = round(max(sil_width), 4),
+    pct_positivos = round(mean(sil_width > 0) * 100, 1),
+    pct_excelentes = round(mean(sil_width > 0.5) * 100, 1),
+    pct_aceptables = round(mean(sil_width > 0.25 & sil_width <= 0.5) * 100, 1),
+    pct_debiles = round(mean(sil_width <= 0.25 & sil_width > 0) * 100, 1),
+    pct_negativos = round(mean(sil_width < 0) * 100, 1)
+  ) %>%
+  ungroup()
+
+cat(" Estadísticas por cluster:\n")
+print(as.data.frame(sil_stats))
+
+# 4. GRÁFICO DE SILHOUETTE (ggplot2)
+# ----------------------------------------------
+
+p_sil_ggplot <- ggplot(sil_df, aes(x = reorder(1:nrow(sil_df), sil_width), 
+                                    y = sil_width, 
+                                    fill = as.factor(cluster))) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_hline(yintercept = mean(sil_df$sil_width), 
+             linetype = "dotted", color = "red", size = 0.8) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "darkgreen", alpha = 0.5) +
+  geom_hline(yintercept = 0.25, linetype = "dashed", color = "orange", alpha = 0.5) +
+  facet_grid(cluster ~ ., scales = "free_y", space = "free_y") +
+  scale_fill_brewer(palette = "Set2") +
+  coord_flip() +
+  labs(title = "Perfil de Silueta por Cluster (k=6)",
+       subtitle = paste("Silueta promedio global:", round(mean(sil_df$sil_width), 3),
+                        "| Línea roja = media global"),
+       x = "Observaciones (ordenadas dentro de cada cluster)",
+       y = "Ancho de Silueta",
+       fill = "Cluster") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "darkred")
+  )
+
+print(p_sil_ggplot)
+
+# 5. GRÁFICO DE SILHOUETTE (fviz )
+# ------------------------------------------------------
+
+p_sil_fviz <- fviz_silhouette(sil_k6, print.summary = FALSE) +
+  coord_flip() +
+  labs(title = "Perfil de Silueta por Cluster (k=6)",
+       subtitle = paste("Silueta promedio:", round(mean(sil_k6[, 3]), 3)),
+       x = "Ancho de Silueta", 
+       y = "Observaciones") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+
+print(p_sil_fviz)
+
+# 6. MÉTRICAS DE EVALUACIÓN
+# --------------------------
+
+metricas_clustering_k6 <- data.frame(
+  Metrica = c("Número de clusters", 
+              "Tamaño mínimo", 
+              "Tamaño máximo",
+              "Tamaño promedio",
+              "Silueta promedio global", 
+              "Desviación estándar silueta",
+              "Calidad Excelente (>0.5)", 
+              "Calidad Aceptable (0.25-0.5)",
+              "Calidad Débil (0-0.25)",
+              "% mal clasificadas (silueta < 0)",
+              "Inercia intra-clusters", 
+              "Inercia explicada",
+              "% de observaciones bien clasificadas (silueta > 0)"),
+  
+  Valor = c(6,
+            min(k6_final$size),
+            max(k6_final$size),
+            round(mean(k6_final$size), 1),
+            round(mean(sil_k6[, 3]), 4),
+            round(sd(sil_k6[, 3]), 4),
+            paste0(round(mean(sil_k6[, 3] > 0.5) * 100, 1), "%"),
+            paste0(round(mean(sil_k6[, 3] > 0.25 & sil_k6[, 3] <= 0.5) * 100, 1), "%"),
+            paste0(round(mean(sil_k6[, 3] > 0 & sil_k6[, 3] <= 0.25) * 100, 1), "%"),
+            paste0(round(mean(sil_k6[, 3] < 0) * 100, 1), "%"),
+            round(k6_final$tot.withinss, 2),
+            paste0(round(k6_final$betweenss / k6_final$totss * 100, 1), "%"),
+            paste0(round(mean(sil_k6[, 3] > 0) * 100, 1), "%"))
+)
+
+# Mostrar tabla
+cat("========================================================\n")
+cat(" MÉTRICAS DE EVALUACIÓN (k=6)\n")
+cat("========================================================\n\n")
+knitr::kable(metricas_clustering_k6, 
+             caption = "**Métricas de Evaluación del Clustering (k=6)**",
+             align = c("l", "c"))
+
+# 7. RESUMEN POR CLUSTER
+# -----------------------------------------------
+
+resumen_clusters_k6 <- sil_stats %>%
+  mutate(
+    Cluster = cluster,
+    Porcentaje = paste0(round(tamaño / sum(tamaño) * 100, 1), "%"),
+    Interpretacion = case_when(
+      silueta_promedio > 0.5 ~ "EXCELENTE",
+      silueta_promedio > 0.3 ~ "BUENO",
+      silueta_promedio > 0.2 ~ "ACEPTABLE",
+      TRUE ~ "DÉBIL"
+    ),
+    Distribucion = paste0(pct_excelentes, "% excelente / ", 
+                          pct_aceptables, "% aceptable / ",
+                          pct_debiles, "% débil / ",
+                          pct_negativos, "% negativo")
+  ) %>%
+  select(Cluster, Tamaño = tamaño, Porcentaje, 
+         Silueta_Promedio = silueta_promedio, 
+         Min_Silueta = silueta_min,
+         Max_Silueta = silueta_max,
+         Distribucion,
+         Interpretacion)
+
+
+cat("========================================================\n")
+cat(" RESUMEN POR CLUSTER (k=6)\n")
+cat("========================================================\n\n")
+
+knitr::kable(resumen_clusters_k6, 
+             caption = "**Estadísticas Detalladas por Cluster (k=6)**",
+             align = c("c", "c", "c", "c", "c", "c", "l", "l"))
+
+# 8. INTERPRETACIÓN DE LA CALIDAD
+# --------------------------------
+
+cat("========================================================\n")
+cat(" INTERPRETACIÓN DE LA CALIDAD (k=6)\n")
+cat("========================================================\n\n")
+
+cat(" CRITERIOS DE EVALUACIÓN:\n")
+cat("   • Silhouette > 0.5: Excelente (clusters bien separados)\n")
+cat("   • Silhouette 0.3 - 0.5: Bueno (estructura razonable)\n")
+cat("   • Silhouette 0.2 - 0.3: Aceptable (posible superposición)\n")
+cat("   • Silhouette < 0.2: Débil (clusters no bien definidos)\n\n")
+
+# Evaluación cualitativa
+sil_global <- mean(sil_k6[, 3])
+sil_sd <- sd(sil_k6[, 3])
+
+cat(" EVALUACIÓN CUALITATIVA:\n")
+cat("   • Silueta promedio global:", round(sil_global, 4), "\n")
+cat("   • Desviación estándar:", round(sil_sd, 4), "\n")
+cat("   • Observaciones con silueta positiva:", 
+    round(mean(sil_k6[, 3] > 0) * 100, 1), "%\n")
+cat("   • Observaciones con silueta negativa:", 
+    round(mean(sil_k6[, 3] < 0) * 100, 1), "%\n\n")
+
+if(sil_global > 0.5) {
+  cat(" EVALUACIÓN: EXCELENTE\n")
+  cat("   Los 6 clusters están muy bien definidos y separados.\n")
+  cat("   La segmentación es estadísticamente robusta.\n")
+} else if(sil_global > 0.3) {
+  cat(" EVALUACIÓN: BUENA\n")
+  cat("   Estructura de clusters razonable y válida.\n")
+  cat("   Los 6 perfiles son diferenciables.\n")
+} else if(sil_global > 0.2) {
+  cat(" EVALUACIÓN: ACEPTABLE\n")
+  cat("   Hay superposición natural entre algunos clusters,\n")
+  cat("   pero los 6 perfiles son interpretables comercialmente.\n")
+} else {
+  cat(" EVALUACIÓN: DÉBIL\n")
+  cat("   Los clusters no están bien definidos.\n")
+  cat("   Se recomienda reconsiderar el número de clusters.\n")
+}
+
+# 9. COMPARACIÓN CON k=4 (si está disponible)
+# --------------------------------------------
+
+if(exists("sil_promedio_k4")) {
+  cat("========================================================\n")
+  cat(" COMPARACIÓN CON k=4\n")
+  cat("========================================================\n\n")
+  
+  diferencia <- sil_global - sil_promedio_k4
+  dif_pct <- round(abs(diferencia) / sil_promedio_k4 * 100, 1)
+  
+  cat(" Comparación de calidad:\n")
+  cat("   • k=4: silueta =", round(sil_promedio_k4, 4), "\n")
+  cat("   • k=6: silueta =", round(sil_global, 4), "\n")
+  cat("   • Diferencia:", round(diferencia, 4), "(", dif_pct, "%)\n\n")
+  
+  if(diferencia > 0.03) {
+    cat(" k=6 tiene MEJOR CALIDAD ESTADÍSTICA que k=4\n")
+    cat("   La diferencia es sustancial (>0.03 puntos).\n")
+  } else if(diferencia < -0.03) {
+    cat(" k=4 tiene MEJOR CALIDAD ESTADÍSTICA que k=6\n")
+    cat("   La diferencia es sustancial (>0.03 puntos).\n")
+  } else {
+    cat(" k=4 y k=6 tienen CALIDAD ESTADÍSTICA SIMILAR\n")
+    cat("   La diferencia es pequeña (<0.03 puntos).\n")
+    cat("   La decisión puede basarse en criterios comerciales.\n")
+  }
+}
+
+# 10. EXPORTAR RESULTADOS
+# -----------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+# Guardar métricas
+write.csv(metricas_clustering_k6, "resultados_finales/metricas_clustering_k6.csv", row.names = FALSE)
+write.csv(resumen_clusters_k6, "resultados_finales/resumen_clusters_k6.csv", row.names = FALSE)
+
+# Guardar el objeto sil para uso futuro
+saveRDS(sil_k6, "resultados_finales/silhouette_object_k6.rds")
+
+cat("\n\n Resultados de silhouette (k=6) guardados en 'resultados_finales/'\n")
+cat("   • metricas_clustering_k6.csv - Métricas globales\n")
+cat("   • resumen_clusters_k6.csv - Estadísticas por cluster\n")
+cat("   • silhouette_object_k6.rds - Objeto silhouette para uso futuro\n")
+```
+
+
+##Silhouette k=4
+```{r message=FALSE, warning=FALSE}
+
+#chunk5.3
+
+# EVALUACIÓN DEL CLUSTERING CON SILHOUETTE - ESCENARIO k=4
+# ============================================
+
+cat("EVALUACIÓN DEL CLUSTERING CON SILHOUETTE (k=4)\n")
+cat("========================================================\n\n")
+
+# 1. VERIFICAR QUE TENEMOS LOS OBJETOS NECESARIOS
+# ------------------------------------------------
+
+if(!exists("k4_final")) {
+  cat("Generando clustering con k=4...\n")
+  set.seed(123)
+  k4_final <- kmeans(datos_cluster, centers = 4, nstart = 100, iter.max = 100)
+  cat("Clustering con k=4 generado\n")
+}
+
+if(!exists("datos_cluster")) {
+  if(exists("datos_pca_coord") && "id" %in% names(datos_pca_coord)) {
+    datos_cluster <- datos_pca_coord %>% select(-id)
+    cat("datos_cluster recreado desde datos_pca_coord\n")
+  } else {
+    stop("No se encuentran los datos para calcular silhouette")
+  }
+}
+
+# 2. CALCULAR SILHOUETTE
+# -----------------------
+
+cat("Calculando silhouette para k = 4...\n")
+
+dist_matrix <- dist(datos_cluster)
+sil <- silhouette(k4_final$cluster, dist_matrix)
+
+cat("Silhouette calculado correctamente\n")
+cat("  • Dimensiones:", nrow(sil), "x", ncol(sil), "\n")
+cat("  • Silueta promedio global:", round(mean(sil[, 3]), 4), "\n\n")
+
+# 3. CALCULAR ESTADÍSTICAS POR CLUSTER
+# -------------------------------------
+
+sil_df <- as.data.frame(sil[, 1:3])
+names(sil_df) <- c("cluster", "neighbor", "sil_width")
+
+sil_stats <- sil_df %>%
+  group_by(cluster) %>%
+  summarise(
+    tamaño = n(),
+    silueta_promedio = round(mean(sil_width), 4),
+    silueta_min = round(min(sil_width), 4),
+    silueta_max = round(max(sil_width), 4),
+    pct_positivos = round(mean(sil_width > 0) * 100, 1)
+  ) %>%
+  ungroup()
+
+cat("Estadísticas por cluster:\n")
+print(as.data.frame(sil_stats))
+
+# 4. GRÁFICO DE SILHOUETTE
+# ----------------------------------------------
+
+p_sil_ggplot <- ggplot(sil_df, aes(x = reorder(1:nrow(sil_df), sil_width), 
+                                    y = sil_width, 
+                                    fill = as.factor(cluster))) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_hline(yintercept = mean(sil_df$sil_width), 
+             linetype = "dotted", color = "red", size = 0.8) +
+  facet_grid(cluster ~ ., scales = "free_y", space = "free_y") +
+  scale_fill_brewer(palette = "Set1") +
+  coord_flip() +
+  labs(title = "Perfil de Silueta por Cluster (k=4)",
+       subtitle = paste("Silueta promedio global:", round(mean(sil_df$sil_width), 3),
+                        "| Línea roja = media global"),
+       x = "Observaciones (ordenadas dentro de cada cluster)",
+       y = "Ancho de Silueta",
+       fill = "Cluster") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 10),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "darkred")
+  )
+
+print(p_sil_ggplot)
+
+# 5. MÉTRICAS DE EVALUACIÓN
+# --------------------------
+
+metricas_clustering <- data.frame(
+  Metrica = c("Número de clusters", 
+              "Tamaño mínimo", 
+              "Tamaño máximo",
+              "Silueta promedio global", 
+              "Calidad (Silueta > 0.5)", 
+              "Inercia intra-clusters", 
+              "Inercia explicada",
+              "% observaciones bien clasificadas (silueta > 0)",
+              "% observaciones mal clasificadas (silueta < 0)"),
+  
+  Valor = c(4,
+            min(k4_final$size),
+            max(k4_final$size),
+            round(mean(sil[, 3]), 4),
+            paste0(round(mean(sil[, 3] > 0.5) * 100, 1), "%"),
+            round(k4_final$tot.withinss, 2),
+            paste0(round(k4_final$betweenss / k4_final$totss * 100, 1), "%"),
+            paste0(round(mean(sil[, 3] > 0) * 100, 1), "%"),
+            paste0(round(mean(sil[, 3] < 0) * 100, 1), "%"))
+)
+
+knitr::kable(metricas_clustering, 
+             caption = "**Métricas de Evaluación del Clustering (k=4)**",
+             align = c("l", "c"))
+
+# 6. RESUMEN POR CLUSTER
+# ------------------------------------------
+
+resumen_clusters <- sil_stats %>%
+  mutate(
+    Cluster = cluster,
+    Porcentaje = paste0(round(tamaño / sum(tamaño) * 100, 1), "%"),
+    Interpretacion = case_when(
+      silueta_promedio > 0.5 ~ "Excelente",
+      silueta_promedio > 0.3 ~ "Bueno",
+      silueta_promedio > 0.2 ~ "Aceptable",
+      TRUE ~ "Débil"
+    )
+  ) %>%
+  select(Cluster, Tamaño = tamaño, Porcentaje, 
+         Silueta_Promedio = silueta_promedio, 
+         Min_Silueta = silueta_min,
+         Max_Silueta = silueta_max,
+         `% Positivos` = pct_positivos,
+         Interpretacion)
+
+cat("\nRESUMEN POR CLUSTER (k=4)\n")
+cat("========================================================\n\n")
+
+knitr::kable(resumen_clusters, 
+             caption = "**Estadísticas Detalladas por Cluster (k=4)**",
+             align = c("c", "c", "c", "c", "c", "c", "c", "l"))
+
+# 7. INTERPRETACIÓN DE LA CALIDAD
+# --------------------------------
+
+cat("\n\nINTERPRETACIÓN DE LA CALIDAD (k=4):\n")
+cat("----------------------------------------\n")
+cat("• Silhouette > 0.5: Excelente (clusters bien separados)\n")
+cat("• Silhouette 0.3 - 0.5: Bueno (estructura razonable)\n")
+cat("• Silhouette 0.2 - 0.3: Aceptable (posible superposición)\n")
+cat("• Silhouette < 0.2: Débil (clusters no bien definidos)\n\n")
+
+sil_global <- mean(sil[, 3])
+cat("Evaluación cualitativa:\n")
+if(sil_global > 0.5) {
+  cat("  EXCELENTE: Los clusters están muy bien definidos y separados\n")
+} else if(sil_global > 0.3) {
+  cat("  BUENA: Estructura de clusters razonable y válida\n")
+} else if(sil_global > 0.2) {
+  cat("  ACEPTABLE: Hay superposición natural pero los clusters son interpretables\n")
+} else {
+  cat("  DÉBIL: Los clusters no están bien definidos, reconsiderar k\n")
+}
+
+# 8. EXPORTAR RESULTADOS
+# -----------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+write.csv(metricas_clustering, "resultados_finales/metricas_clustering_k4.csv", row.names = FALSE)
+write.csv(resumen_clusters, "resultados_finales/resumen_clusters_k4.csv", row.names = FALSE)
+saveRDS(sil, "resultados_finales/silhouette_object_k4.rds")
+
+cat("\nResultados guardados en 'resultados_finales/'\n")
+cat("  • metricas_clustering_k4.csv\n")
+cat("  • resumen_clusters_k4.csv\n")
+cat("  • silhouette_object_k4.rds\n")
+
+```
+```{r message=FALSE, warning=FALSE}
+# chunk5.3b
+# ÍNDICES DE VALIDACIÓN INTERNA: DAVIES-BOULDIN Y CALINSKI-HARABASZ
+# ================================================================================
+
+# Instalar y cargar paquetes necesarios
+if(!require(fpc)) install.packages("fpc")
+if(!require(cluster)) install.packages("cluster")
+
+library(fpc)
+library(cluster)
+
+# Calcular matriz de distancias
+dist_matrix <- dist(datos_cluster)
+
+# Calcular índices para k=4
+sil_k4 <- mean(silhouette(k4_final$cluster, dist_matrix)[, 3])
+db_k4 <- cluster.stats(dist_matrix, k4_final$cluster)$avg.silwidth
+ch_k4 <- calinhara(datos_cluster, k4_final$cluster)
+
+# Calcular índices para k=6
+sil_k6 <- mean(silhouette(k6_final$cluster, dist_matrix)[, 3])
+db_k6 <- cluster.stats(dist_matrix, k6_final$cluster)$avg.silwidth
+ch_k6 <- calinhara(datos_cluster, k6_final$cluster)
+
+# Crear dataframe
+indices_validacion <- data.frame(
+  k = c(4, 6),
+  Silhouette = round(c(sil_k4, sil_k6), 4),
+  Davies_Bouldin = round(c(db_k4, db_k6), 4),
+  Calinski_Harabasz = round(c(ch_k4, ch_k6), 2)
+)
+
+# Mostrar resultados
+print(indices_validacion)
+
+
+```
+
+```{r}
+# chunk5.3c
+# CREAR DATOS_PERFIL Y FUNCIÓN CALCULAR_MODA
+
+calcular_moda <- function(x, na.rm = TRUE) {
+  if (na.rm) x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA)
+  uniqx <- unique(x)
+  uniqx[which.max(tabulate(match(x, uniqx)))]
+}
+
+datos_perfil <- datos_limpios %>%
+  mutate(empresa = datos_raw$empresa) %>%
+  select(empresa, tipo_estructura, depto, especializacion, usa_credito,
+         publicidad, entregas_mes, num_valores_dist, num_cond_perm,
+         num_tipos_publicidad, num_lineas) %>%
+  mutate(cluster = k4_final$cluster)
+```
+
+
+```{r}
+#chunk5.3
+# ============================================
+# COMBINAR CLUSTERS CON DATOS ORIGINALES (k=4)
+# ============================================
+
+# Ejecutar k-means con k=4
+if(!exists("k4_final")) {
+  cat("Generando clustering con k=4...\n")
+  set.seed(123)
+  k4_final <- kmeans(datos_cluster, centers = 4, nstart = 100, iter.max = 100)
+  cat("Clustering con k=4 generado\n")
+}
+
+# Actualizar la variable cluster en datos_pca_coord
+datos_pca_coord$cluster <- k4_final$cluster
+
+# Añadir el cluster a datos_completos
+datos_completos$cluster <- datos_pca_coord$cluster
+
+# Crear datos_perfil correctamente
+datos_perfil <- datos_limpios %>%
+  mutate(empresa = datos_raw$empresa) %>%
+  select(empresa, 
+         tipo_estructura, depto, especializacion, usa_credito,
+         publicidad, entregas_mes, num_valores_dist, num_cond_perm,
+         num_tipos_publicidad, num_lineas) %>%
+  mutate(cluster = datos_completos$cluster)
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk5.4a
+
+# PERFIL POR CLUSTER (k=6)
+# ============================================
+
+# Actualizar datos_perfil con los clusters correctos
+datos_perfil$cluster <- datos_completos$cluster
+
+# Verificar distribución
+
+cat(" DISTRIBUCIÓN DE CLUSTERS EN DATOS_PERFIL\n")
+cat("========================================================\n")
+print(table(datos_perfil$cluster))
+
+# Calcular perfil
+perfil_clusters <- datos_perfil %>%
+  group_by(cluster) %>%
+  summarise(
+    n = n(),
+    porcentaje = paste0(round(n() / nrow(datos_perfil) * 100, 1), "%"),
+    
+    # Modas para categóricas
+    tipo_estructura_moda = calcular_moda(tipo_estructura),
+    depto_moda = calcular_moda(depto),
+    especializacion_moda = calcular_moda(especializacion),
+    usa_credito_moda = calcular_moda(usa_credito),
+    entregas_mes_moda = calcular_moda(entregas_mes),
+    
+    # Promedios para numéricas
+    num_valores_dist_media = round(mean(num_valores_dist, na.rm = TRUE), 1),
+    num_cond_perm_media = round(mean(num_cond_perm, na.rm = TRUE), 1),
+    num_tipos_publicidad_media = round(mean(num_tipos_publicidad, na.rm = TRUE), 1),
+    num_lineas_media = round(mean(num_lineas, na.rm = TRUE), 1)
+  )
+
+# Mostrar tabla
+knitr::kable(perfil_clusters, caption = "**Perfil de Clusters (k=6) - Variables Originales**")
+
+# Verificar que tenemos 6 clusters
+
+cat(" NÚMERO DE CLUSTERS EN EL PERFIL:", nrow(perfil_clusters), "\n")
+cat("========================================================\n")
+```
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk5.5
+# BOXPLOTS DE VARIABLES CONTINUAS POR CLUSTER - ESCENARIOS k=4 Y k=6
+# ================================================================================
+
+cat("VISUALIZACIÓN DE PERFILES POR CLUSTER\n")
+cat("ESCENARIOS: k = 4 (estabilidad bootstrap) y k = 6 (máxima silueta)\n")
+cat("============================================================================\n\n")
+
+# 1. VERIFICAR DATOS BASE
+# ================================================================================
+
+if(!exists("datos_cluster")) {
+  if(exists("datos_pca_coord") && "id" %in% names(datos_pca_coord)) {
+    datos_cluster <- datos_pca_coord %>% select(-id)
+  } else {
+    stop("datos_cluster no encontrado")
+  }
+}
+
+if(!exists("datos_completos")) {
+  stop("datos_completos no existe")
+}
+
+# Variables a graficar
+vars_a_graficar <- c("n_empleados", "n_clientes", "ventas_mes", "compra_mensual_num", "num_lineas")
+vars_existentes <- intersect(vars_a_graficar, names(datos_completos))
+
+# 2. FUNCIÓN PARA GENERAR BOXPLOTS (k GENÉRICO)
+# ================================================================================
+
+generar_boxplots <- function(k, datos_cluster, datos_completos, vars_existentes) {
+  
+  cat("\n============================================================================\n")
+  cat("ESCENARIO: k =", k, "\n")
+  cat("============================================================================\n")
+  
+  set.seed(123)
+  kmeans_temp <- kmeans(datos_cluster, centers = k, nstart = 100, iter.max = 100)
+  
+  datos_temp <- datos_completos
+  datos_temp$cluster <- as.factor(kmeans_temp$cluster)
+  
+  cat("Distribución de clusters:\n")
+  print(table(datos_temp$cluster))
+  cat("\n")
+  
+  plots_list <- list()
+  
+  for(var in vars_existentes) {
+    
+    titulo <- case_when(
+      var == "n_empleados" ~ "Empleados por Cluster",
+      var == "n_clientes" ~ "Clientes por Cluster",
+      var == "ventas_mes" ~ "Ventas Mensuales por Cluster",
+      var == "compra_mensual_num" ~ "Frecuencia de Compra por Cluster",
+      var == "num_lineas" ~ "Líneas de Producto por Cluster",
+      TRUE ~ paste(var, "por Cluster")
+    )
+    
+    p <- ggplot(datos_temp, aes(x = cluster, y = .data[[var]], fill = cluster)) +
+      geom_boxplot(alpha = 0.7, outlier.color = "red", outlier.shape = 19,
+                   outlier.size = 2, outlier.alpha = 0.7) +
+      stat_summary(fun = mean, geom = "point", shape = 18, size = 3,
+                   color = "black", aes(group = cluster)) +
+      scale_fill_brewer(palette = "Set2") +
+      labs(title = titulo, x = "Cluster", y = var,
+           subtitle = paste("Media global =", round(mean(datos_temp[[var]], na.rm = TRUE), 1))) +
+      theme_minimal() +
+      theme(legend.position = "none",
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 11),
+            plot.subtitle = element_text(hjust = 0.5, size = 9, color = "gray30"))
+    
+    plots_list[[var]] <- p
+  }
+  
+  n_vars <- length(plots_list)
+  if(n_vars == 5) {
+    grid.arrange(plots_list[[1]], plots_list[[2]], plots_list[[3]],
+                 plots_list[[4]], plots_list[[5]],
+                 ncol = 3, nrow = 2,
+                 top = paste("Perfil de Clusters (k =", k, ") - Variables Clave"))
+  } else if(n_vars >= 3) {
+    grid.arrange(grobs = plots_list, ncol = 3,
+                 top = paste("Perfil de Clusters (k =", k, ") - Variables Clave"))
+  }
+  
+  cat("\nESTADÍSTICAS DESCRIPTIVAS (k =", k, "):\n")
+  cat("----------------------------------------\n")
+  
+  for(var in vars_existentes) {
+    cat("\n", var, ":\n")
+    
+    stats_cluster <- datos_temp %>%
+      group_by(cluster) %>%
+      summarise(
+        n = n(),
+        media = round(mean(.data[[var]], na.rm = TRUE), 1),
+        mediana = round(median(.data[[var]], na.rm = TRUE), 1),
+        min = round(min(.data[[var]], na.rm = TRUE), 1),
+        max = round(max(.data[[var]], na.rm = TRUE), 1)
+      )
+    
+    print(as.data.frame(stats_cluster))
+  }
+  
+  return(invisible(list(kmeans = kmeans_temp, datos = datos_temp)))
+}
+
+# 3. EJECUTAR AMBOS ESCENARIOS
+# ================================================================================
+
+resultado_k4 <- generar_boxplots(4, datos_cluster, datos_completos, vars_existentes)
+resultado_k6 <- generar_boxplots(6, datos_cluster, datos_completos, vars_existentes)
+
+# 4. RESUMEN COMPARATIVO
+# ================================================================================
+
+cat("\n============================================================================\n")
+cat("RESUMEN COMPARATIVO k=4 vs k=6\n")
+cat("============================================================================\n\n")
+
+cat("TAMAÑO DE CLUSTERS:\n")
+cat("  k=4:\n")
+for(i in 1:4) {
+  cat("    Cluster", i, ":", sum(resultado_k4$kmeans$cluster == i), "subdistribuidores\n")
+}
+cat("\n  k=6:\n")
+for(i in 1:6) {
+  cat("    Cluster", i, ":", sum(resultado_k6$kmeans$cluster == i), "subdistribuidores\n")
+}
+
+cat("\nNOTA: k=4 seleccionado por estabilidad bootstrap superior,\n")
+cat("      k=6 presentado como referencia por mayor silueta promedio.\n")
+```
+
+
+Visualizacion interactiva
+```{r message=FALSE, warning=FALSE}
+
+#chunk5.6
+#visualizacion 3D de k=4
+# Recuperar nombres de empresas
+datos_perfil$empresa <- datos_raw$empresa
+
+# Datos para visualización
+datos_viz <- datos_pca_coord %>%
+  left_join(datos_perfil %>% select(cluster, empresa, depto, especializacion),
+            by = "cluster")
+
+# Gráfico 3D interactivo
+plot_ly(datos_viz, 
+        x = ~PC1, y = ~PC2, z = ~PC3,
+        color = ~as.factor(cluster),
+        colors = c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3"),
+        type = "scatter3d", mode = "markers",
+        marker = list(size = 5),
+        text = ~paste("Empresa:", empresa,
+                      "<br>Depto:", depto,
+                      "<br>Especialización:", especializacion),
+        hoverinfo = "text") %>%
+  layout(title = "Segmentación de Subdistribuidores - Vista 3D",
+         scene = list(xaxis = list(title = "PC1"),
+                      yaxis = list(title = "PC2"),
+                      zaxis = list(title = "PC3")))
+```
+```{r message=FALSE, warning=FALSE}
+
+
+#chunk5.7
+# VISUALIZACIÓN 3D INTERACTIVA - ESCENARIO k=6
+# ================================================================================
+
+datos_perfil$empresa <- datos_raw$empresa
+
+set.seed(123)
+kmeans_k6 <- kmeans(datos_cluster, centers = 6, nstart = 100, iter.max = 100)
+
+datos_pca_coord$cluster_k6 <- kmeans_k6$cluster
+
+datos_viz_k6 <- datos_pca_coord %>%
+  left_join(datos_perfil %>% select(empresa, depto, especializacion),
+            by = character())
+
+datos_viz_k6$cluster <- datos_viz_k6$cluster_k6
+
+n_clusters <- 6
+paleta_colores <- RColorBrewer::brewer.pal(n = n_clusters, name = "Set1")
+
+plot_ly(datos_viz_k6, 
+        x = ~PC1, y = ~PC2, z = ~PC3,
+        color = ~as.factor(cluster),
+        colors = paleta_colores,
+        type = "scatter3d", mode = "markers",
+        marker = list(size = 5),
+        text = ~paste("Empresa:", empresa,
+                      "<br>Cluster:", cluster,
+                      "<br>Depto:", depto,
+                      "<br>Especialización:", especializacion),
+        hoverinfo = "text") %>%
+  layout(title = "Segmentación de Subdistribuidores - Vista 3D (k = 6)",
+         scene = list(xaxis = list(title = "PC1"),
+                      yaxis = list(title = "PC2"),
+                      zaxis = list(title = "PC3")))
+```
+
+Resumen y conclusiones
+```{r message=FALSE, warning=FALSE}
+
+#chunk5.8
+
+#Resumen y conclusiones
+
+
+# RESUMEN COMPARATIVO - ESCENARIOS k=4 Y k=6
+# ================================================================================
+
+cat("\n", rep("=", 70), "\n", sep = "")
+cat("RESUMEN COMPARATIVO DE SEGMENTACIÓN\n")
+cat("k = 4 (estabilidad bootstrap) vs k = 6 (máxima silueta)\n")
+cat(rep("=", 70), "\n\n", sep = "")
+
+# ESCENARIO k=4 (usando k4_final que ya existe del chunk 5.3)
+# ------------------------------------------------------------------------------
+cat("ESCENARIO k = 4\n")
+cat("--------------------\n")
+
+if(!exists("k4_final")) {
+  set.seed(123)
+  k4_final <- kmeans(datos_cluster, centers = 4, nstart = 100, iter.max = 100)
+}
+
+dist_matrix <- dist(datos_cluster)
+sil_k4 <- silhouette(k4_final$cluster, dist_matrix)
+sil_prom_k4 <- mean(sil_k4[, 3])
+
+cat("  • Silueta promedio:", round(sil_prom_k4, 3), "\n")
+cat("  • Inercia explicada:", round(k4_final$betweenss / k4_final$totss * 100, 1), "%\n")
+cat("  • Tamaño de segmentos:\n")
+
+for(i in 1:4) {
+  n_i <- sum(k4_final$cluster == i)
+  cat("      Cluster", i, ":", n_i, "empresas (", 
+      round(n_i / nrow(datos_cluster) * 100, 1), "%)\n")
+}
+
+# ESCENARIO k=6 
+# ------------------------------------------------------------------------------
+cat("\nESCENARIO k = 6\n")
+cat("--------------------\n")
+
+if(!exists("k6_final")) {
+  set.seed(123)
+  k6_final <- kmeans(datos_cluster, centers = 6, nstart = 100, iter.max = 100)
+}
+
+sil_k6 <- silhouette(k6_final$cluster, dist_matrix)
+sil_prom_k6 <- mean(sil_k6[, 3])
+
+cat("  • Silueta promedio:", round(sil_prom_k6, 3), "\n")
+cat("  • Inercia explicada:", round(k6_final$betweenss / k6_final$totss * 100, 1), "%\n")
+cat("  • Tamaño de segmentos:\n")
+
+for(i in 1:6) {
+  n_i <- sum(k6_final$cluster == i)
+  cat("      Cluster", i, ":", n_i, "empresas (", 
+      round(n_i / nrow(datos_cluster) * 100, 1), "%)\n")
+}
+
+# COMPARATIVA
+# ------------------------------------------------------------------------------
+cat("\nCOMPARATIVA\n")
+cat("--------------------\n")
+cat("  • Diferencia de silueta:", round(sil_prom_k6 - sil_prom_k4, 4), 
+    "(a favor de k=", ifelse(sil_prom_k6 > sil_prom_k4, 6, 4), ")\n")
+cat("  • Diferencia de inercia explicada:", 
+    round((k6_final$betweenss/k6_final$totss - k4_final$betweenss/k4_final$totss) * 100, 1), 
+    "puntos porcentuales\n")
+
+cat("\nNOTA: k=4 prioriza estabilidad ante remuestreo (bootstrap),\n")
+cat("      k=6 prioriza calidad estadística (silueta).\n")
+cat("      La elección final depende del objetivo comercial.\n")
+
+```
+
+Exportar resultados
+```{r message=FALSE, warning=FALSE}
+#chunk5.9
+# Crear directorio si no existe
+if(!dir.exists("resultados_finales")) {
+  dir.create("resultados_finales")
+}
+
+# Exportar datasets
+write.csv(datos_pca_coord, "resultados_finales/datos_clusters.csv", row.names = FALSE)
+write.csv(datos_perfil, "resultados_finales/perfil_clusters.csv", row.names = FALSE)
+
+# Exportar métricas
+write.csv(metricas_clustering, "resultados_finales/metricas_clustering.csv", row.names = FALSE)
+write.csv(varianza_df, "resultados_finales/varianza_pca.csv", row.names = FALSE)
+
+```
+
+
+# 6. CLUSTERING JERARQUICO ALGORITMO HC (usado como metodo de validacion)
+
+
+```{r message=FALSE, warning=FALSE}
+
+#chunk6.1
+
+# CLUSTERING JERÁRQUICO - MÉTODO DE VALIDACIÓN
+# ================================================================================
+
+cat("CLUSTERING JERÁRQUICO \n")
+cat("Uso: método de validación externa\n")
+cat("============================================================================\n\n")
+
+# 1. VERIFICAR DATOS
+# ------------------------------------------------------------------------------
+if(!exists("datos_cluster")) {
+  if(exists("datos_pca_coord") && "id" %in% names(datos_pca_coord)) {
+    datos_cluster <- datos_pca_coord %>% select(-id)
+    cat("datos_cluster recreado desde datos_pca_coord\n")
+  } else {
+    stop("datos_cluster no encontrado")
+  }
+}
+
+# 2. CALCULAR CLUSTERING JERÁRQUICO
+# ------------------------------------------------------------------------------
+cat("Calculando matriz de distancias euclídeas...\n")
+dist_matrix <- dist(datos_cluster, method = "euclidean")
+
+cat("Aplicando clustering jerárquico con método de Ward...\n")
+hc_ward <- hclust(dist_matrix, method = "ward.D2")
+
+cat("Clustering jerárquico completado\n")
+cat("  • Observaciones:", length(hc_ward$order), "\n")
+cat("  • Método de enlace: Ward\n")
+cat("  • Distancia: Euclídea\n\n")
+
+# 3. IDENTIFICAR NÚMERO ÓPTIMO DE CLUSTERS (SILUETA)
+# ------------------------------------------------------------------------------
+cat("IDENTIFICACIÓN DEL NÚMERO ÓPTIMO DE CLUSTERS\n")
+cat("----------------------------------------\n")
+
+k_max_hc <- min(10, nrow(datos_cluster) - 1)
+sil_hc <- numeric(k_max_hc - 1)
+
+for(k in 2:k_max_hc) {
+  grupos_hc <- cutree(hc_ward, k = k)
+  sil <- silhouette(grupos_hc, dist_matrix)
+  sil_hc[k - 1] <- mean(sil[, 3])
+}
+
+k_optimo_hc <- which.max(sil_hc) + 1
+sil_max_hc <- max(sil_hc)
+
+cat("  Mejor k por silueta:", k_optimo_hc, 
+    "(silueta =", round(sil_max_hc, 4), ")\n\n")
+
+# 4. COMPARACIÓN CON K-MEANS (k=4 Y k=6)
+# ------------------------------------------------------------------------------
+set.seed(123)
+k4_km <- kmeans(datos_cluster, centers = 4, nstart = 100)
+k6_km <- kmeans(datos_cluster, centers = 6, nstart = 100)
+
+sil_k4_km <- mean(silhouette(k4_km$cluster, dist_matrix)[, 3])
+sil_k6_km <- mean(silhouette(k6_km$cluster, dist_matrix)[, 3])
+
+cat("COMPARACIÓN DE MÉTODOS\n")
+cat("----------------------------------------\n")
+cat("Jerárquico (óptimo): k =", k_optimo_hc, "| silueta =", round(sil_max_hc, 4), "\n")
+cat("K-means (k=4):       silueta =", round(sil_k4_km, 4), "\n")
+cat("K-means (k=6):       silueta =", round(sil_k6_km, 4), "\n\n")
+
+if(k_optimo_hc == 4 || k_optimo_hc == 6) {
+  cat("VALIDACIÓN: El clustering jerárquico coincide con k=", k_optimo_hc, 
+      ", lo que respalda la elección.\n")
+} else {
+  cat("NOTA: El jerárquico sugiere k=", k_optimo_hc, 
+      ", diferente de los escenarios evaluados (k=4, k=6).\n")
+  cat("Esto es esperable en validación cruzada con métodos distintos.\n")
+}
+
+# 5. VISUALIZACIÓN DEL DENDRAGRAMA
+# ------------------------------------------------------------------------------
+paleta_colores <- RColorBrewer::brewer.pal(n = max(3, k_optimo_hc), name = "Set1")[1:k_optimo_hc]
+
+p_dend <- fviz_dend(hc_ward, 
+                    k = k_optimo_hc,
+                    k_colors = paleta_colores,
+                    color_labels_by_k = TRUE,
+                    rect = TRUE,
+                    rect_border = "cluster",
+                    rect_fill = TRUE,
+                    cex = 0.5,
+                    main = paste("Dendrograma - Clustering Jerárquico (k óptimo =", k_optimo_hc, ")"),
+                    xlab = "Subdistribuidores",
+                    ylab = "Altura (Distancia)")
+
+print(p_dend)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+# chunk6.2
+# DENDRAGRAMA INTERACTIVO - CLUSTERING JERÁRQUICO (k ÓPTIMO = 9)
+# ================================================================================
+
+cat("DENDRAGRAMA INTERACTIVO CON INFORMACIÓN REAL\n")
+cat("k óptimo del algoritmo jerárquico: 9 clusters\n")
+cat("============================================================================\n\n")
+
+library(plotly)
+library(ggdendro)
+library(dplyr)
+library(RColorBrewer)
+
+# 1. PREPARAR LOS DATOS
+# ------------------------------------------------------------------------------
+
+if(!exists("datos_raw")) {
+  datos_raw <- read_excel("datos/Encuesta_limpia.xlsx")
+}
+
+if(!exists("hc_ward")) {
+  stop("hc_ward no encontrado. Ejecute primero el clustering jerárquico.")
+}
+
+# Calcular k óptimo si no existe
+if(!exists("k_optimo_hc")) {
+  dist_matrix <- dist(datos_cluster)
+  k_max_hc <- min(10, nrow(datos_cluster) - 1)
+  sil_hc <- numeric(k_max_hc - 1)
+  
+  for(k in 2:k_max_hc) {
+    grupos_hc <- cutree(hc_ward, k = k)
+    sil <- silhouette(grupos_hc, dist_matrix)
+    sil_hc[k - 1] <- mean(sil[, 3])
+  }
+  k_optimo_hc <- which.max(sil_hc) + 1
+}
+
+cat("Usando k óptimo =", k_optimo_hc, "clusters\n")
+
+info_empresas <- datos_raw %>%
+  select(empresa, direccion, depto) %>%
+  mutate(id = row_number())
+
+dendro_data <- dendro_data(hc_ward, type = "rectangle")
+
+segments <- dendro_data$segments
+
+labels <- dendro_data$labels
+labels$cluster <- cutree(hc_ward, k = k_optimo_hc)[labels$x]
+
+labels <- labels %>%
+  left_join(info_empresas, by = c("x" = "id"))
+
+cat("\nInformación de empresas cargada:\n")
+cat("  • Total empresas:", nrow(labels), "\n")
+cat("  • Empresas con información completa:", sum(!is.na(labels$empresa)), "\n")
+cat("  • Departamentos:", paste(unique(labels$depto), collapse = ", "), "\n")
+cat("  • Clusters formados:", k_optimo_hc, "\n\n")
+
+# Paleta de colores dinámica para 9 clusters
+if(k_optimo_hc <= 9) {
+  cluster_colors <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", 
+                      "#FFFF33", "#A65628", "#F781BF", "#999999")
+  colors_for_clusters <- cluster_colors[1:k_optimo_hc]
+} else {
+  colors_for_clusters <- colorRampPalette(c("#E41A1C", "#377EB8", "#4DAF4A"))(k_optimo_hc)
+}
+
+# 2. CREAR DENDRAGRAMA INTERACTIVO
+# ------------------------------------------------------------------------------
+
+p_dendro_plotly <- plot_ly() %>%
+  
+  add_segments(
+    data = segments,
+    x = ~x, y = ~y,
+    xend = ~xend, yend = ~yend,
+    line = list(color = "gray40", width = 1),
+    hoverinfo = "none",
+    showlegend = FALSE
+  ) %>%
+  
+  add_markers(
+    data = labels,
+    x = ~x, y = ~y,
+    color = ~as.factor(cluster),
+    colors = setNames(colors_for_clusters, 1:k_optimo_hc),
+    marker = list(
+      size = 8,
+      symbol = "circle",
+      line = list(color = "white", width = 1.5),
+      opacity = 0.85
+    ),
+    text = ~paste(
+      "<b>EMPRESA:</b>", ifelse(is.na(empresa), "Sin datos", empresa),
+      "<br><b>DIRECCIÓN:</b>", ifelse(is.na(direccion), "Sin datos", direccion),
+      "<br><b>DEPARTAMENTO:</b>", ifelse(is.na(depto), "Sin datos", depto),
+      "<br><b>CLUSTER:</b>", cluster,
+      "<br><b>ALTURA:</b>", round(y, 2)
+    ),
+    hoverinfo = "text",
+    showlegend = TRUE,
+    name = ~paste("Cluster", cluster)
+  ) %>%
+  
+  layout(
+    title = list(
+      text = paste0("<b>Dendrograma Interactivo - Clustering Jerárquico</b><br>",
+                    "<sup>(k óptimo = ", k_optimo_hc, " clusters por silueta)</sup>"),
+      font = list(size = 18, family = "Arial Black", color = "#2C3E50"),
+      x = 0.5
+    ),
+    xaxis = list(
+      title = "<b>Subdistribuidores (posición en el dendrograma)</b>",
+      showgrid = FALSE,
+      zeroline = FALSE,
+      showticklabels = FALSE
+    ),
+    yaxis = list(
+      title = "<b>Altura (Distancia)</b>",
+      showgrid = TRUE,
+      gridcolor = "#ECF0F1",
+      gridwidth = 1,
+      zeroline = FALSE,
+      tickfont = list(size = 11)
+    ),
+    hoverlabel = list(
+      font = list(size = 12, family = "Arial"),
+      bordercolor = "#2C3E50",
+      bgcolor = "white",
+      padding = list(l = 10, r = 10, t = 10, b = 10)
+    ),
+    legend = list(
+      title = list(text = "<b>CLUSTERS</b>"),
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = 1.10,
+      bgcolor = "rgba(255,255,255,0.95)",
+      bordercolor = "#BDC3C7",
+      borderwidth = 1,
+      font = list(size = 10)
+    ),
+    margin = list(t = 100, b = 60, l = 60, r = 40),
+    paper_bgcolor = "white",
+    plot_bgcolor = "#F8F9F9"
+  ) %>%
+  
+  add_annotations(
+    x = 0.5,
+    y = 1.04,
+    xref = "paper",
+    yref = "paper",
+    text = paste0(
+      "Método de Ward | Distancia Euclídea | ",
+      nrow(labels), " empresas | ",
+      length(unique(labels$depto[!is.na(labels$depto)])), " departamentos"
+    ),
+    showarrow = FALSE,
+    font = list(size = 11, color = "#7F8C8D", family = "Arial")
+  )
+
+# 3. GUARDAR HTML
+# ------------------------------------------------------------------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+htmlwidgets::saveWidget(
+  as_widget(p_dendro_plotly), 
+  file = paste0("resultados_finales/dendrograma_interactivo_k", k_optimo_hc, ".html"),
+  selfcontained = TRUE,
+  title = paste("Dendrograma Interactivo - Clustering Jerárquico k=", k_optimo_hc)
+)
+
+cat("\n Dendrograma guardado en: resultados_finales/dendrograma_interactivo_k", 
+    k_optimo_hc, ".html\n", sep = "")
+
+print(p_dendro_plotly)
+```
+
+# 7. VALIDACION DE METODOS
+
+## Evaluacion de Adjust Rand Index (ARI)
+
+```{r message=FALSE, warning=FALSE}
+# chunk7.1
+# VALIDACIÓN CRUZADA: K-MEANS (k=4 Y k=6) VS JERÁRQUICO (k ÓPTIMO)
+# ================================================================================
+
+cat("VALIDACIÓN CRUZADA: K-MEANS VS CLUSTERING JERÁRQUICO\n")
+cat("============================================================================\n\n")
+
+library(mclust)
+
+# 1. VERIFICAR OBJETOS NECESARIOS
+# ------------------------------------------------------------------------------
+
+if(!exists("hc_ward")) {
+  stop("hc_ward no encontrado. Ejecute primero el clustering jerárquico.")
+}
+
+if(!exists("datos_cluster")) {
+  stop("datos_cluster no encontrado.")
+}
+
+# 2. CLUSTERING JERÁRQUICO (k ÓPTIMO SEGÚN SILUETA)
+# ------------------------------------------------------------------------------
+
+# Calcular el k óptimo del jerárquico basado en silueta
+dist_matrix <- dist(datos_cluster)
+k_max_hc <- min(10, nrow(datos_cluster) - 1)
+sil_hc <- numeric(k_max_hc - 1)
+
+for(k in 2:k_max_hc) {
+  grupos_hc <- cutree(hc_ward, k = k)
+  sil <- silhouette(grupos_hc, dist_matrix)
+  sil_hc[k - 1] <- mean(sil[, 3])
+}
+
+k_optimo_hc <- which.max(sil_hc) + 1
+sil_max_hc <- max(sil_hc)
+
+cluster_jerarquico <- cutree(hc_ward, k = k_optimo_hc)
+
+cat("Clustering jerárquico:\n")
+cat("  • k óptimo (por silueta):", k_optimo_hc, "\n")
+cat("  • Silueta del k óptimo:", round(sil_max_hc, 4), "\n")
+cat("  • Tamaños:", paste(table(cluster_jerarquico), collapse = ", "), "\n\n")
+
+# 3. CLUSTERING K-MEANS (k=4 Y k=6)
+# ------------------------------------------------------------------------------
+
+set.seed(123)
+k4_km <- kmeans(datos_cluster, centers = 4, nstart = 100, iter.max = 100)
+k6_km <- kmeans(datos_cluster, centers = 6, nstart = 100, iter.max = 100)
+
+cat("K-means k=4:\n")
+cat("  • Tamaños:", paste(table(k4_km$cluster), collapse = ", "), "\n")
+cat("\nK-means k=6:\n")
+cat("  • Tamaños:", paste(table(k6_km$cluster), collapse = ", "), "\n\n")
+
+# 4. TABLAS DE CONTINGENCIA
+# ------------------------------------------------------------------------------
+
+tabla_k4 <- table(KMEANS_k4 = k4_km$cluster, JERARQUICO = cluster_jerarquico)
+tabla_k6 <- table(KMEANS_k6 = k6_km$cluster, JERARQUICO = cluster_jerarquico)
+
+cat("TABLA DE CONTINGENCIA (K-means k=4 vs Jerárquico con k=", k_optimo_hc, "):\n", sep = "")
+cat("------------------------------------------------\n")
+print(tabla_k4)
+
+cat("\nTABLA DE CONTINGENCIA (K-means k=6 vs Jerárquico con k=", k_optimo_hc, "):\n", sep = "")
+cat("------------------------------------------------\n")
+print(tabla_k6)
+
+# 5. ÍNDICE DE RAND AJUSTADO (ARI)
+# ------------------------------------------------------------------------------
+
+ari_k4 <- adjustedRandIndex(k4_km$cluster, cluster_jerarquico)
+ari_k6 <- adjustedRandIndex(k6_km$cluster, cluster_jerarquico)
+
+cat("\nÍNDICE DE RAND AJUSTADO (ARI):\n")
+cat("------------------------------------------------\n")
+cat("  K-means k=4 vs Jerárquico (k=", k_optimo_hc, "): ", round(ari_k4, 4), "\n", sep = "")
+cat("  K-means k=6 vs Jerárquico (k=", k_optimo_hc, "): ", round(ari_k6, 4), "\n\n", sep = "")
+
+cat("Interpretación del ARI:\n")
+cat("  > 0.9: Excelente concordancia\n")
+cat("  0.65-0.8: Buena concordancia\n")
+cat("  0.3-0.65: Concordancia moderada\n")
+cat("  < 0.3: Concordancia baja\n")
+
+# 6. CONCORDANCIA SIMPLE
+# ------------------------------------------------------------------------------
+
+conc_k4 <- sum(diag(tabla_k4)) / sum(tabla_k4) * 100
+conc_k6 <- sum(diag(tabla_k6)) / sum(tabla_k6) * 100
+
+cat("\nCONCORDANCIA SIMPLE (% de misma asignación):\n")
+cat("------------------------------------------------\n")
+cat("  K-means k=4 vs Jerárquico:", round(conc_k4, 1), "%\n")
+cat("  K-means k=6 vs Jerárquico:", round(conc_k6, 1), "%\n")
+
+# 7. RESUMEN EJECUTIVO
+# ------------------------------------------------------------------------------
+
+cat("\nRESUMEN EJECUTIVO\n")
+cat("------------------------------------------------\n")
+
+if(ari_k6 > ari_k4) {
+  cat("  • k=6 tiene MAYOR concordancia con el jerárquico (ARI =", round(ari_k6, 3), ")\n")
+} else {
+  cat("  • k=4 tiene MAYOR concordancia con el jerárquico (ARI =", round(ari_k4, 3), ")\n")
+}
+
+cat("\nNOTA: El clustering jerárquico encontró un k óptimo de", k_optimo_hc, "clusters.\n")
+cat("      Esta comparación valida la consistencia entre métodos.\n")
+
+# 8. GUARDAR RESULTADOS
+# ------------------------------------------------------------------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+write.csv(as.data.frame.matrix(tabla_k4), "resultados_finales/tabla_contingencia_k4.csv")
+write.csv(as.data.frame.matrix(tabla_k6), "resultados_finales/tabla_contingencia_k6.csv")
+
+metricas_concordancia <- data.frame(
+  Escenario = c("k=4 vs Jerárquico", "k=6 vs Jerárquico"),
+  k_jerarquico = c(k_optimo_hc, k_optimo_hc),
+  ARI = c(round(ari_k4, 4), round(ari_k6, 4)),
+  Concordancia_Simple = c(round(conc_k4, 1), round(conc_k6, 1))
+)
+write.csv(metricas_concordancia, "resultados_finales/metricas_concordancia.csv", row.names = FALSE)
+
+# Guardar k_optimo_hc para usar en otros chunks
+saveRDS(k_optimo_hc, "checkpoints/k_optimo_hc.rds")
+
+cat("\nResultados guardados en 'resultados_finales/'\n")
+cat("k_optimo_hc =", k_optimo_hc)
+```
+La validación cruzada entre k-means (k=4 y k=6) y el clustering jerárquico (k óptimo=9) muestra que k=6 presenta una mayor concordancia metodológica (ARI=0.657) en comparación con k=4 (ARI=0.524), aunque ambos se clasifican como "MODERADA-BAJA" según los rangos establecidos. El k=6 también logra un cluster más puro (88.9% vs 80.6%), lo que sugiere una mejor capacidad para aislar segmentos homogéneos. Sin embargo, la concordancia simple de k=4 (51.5%) es notablemente alta considerando que compara 4 clusters contra 9 del jerárquico, mientras que el 8.1% de k=6 es esperable dada la arbitrariedad en la numeración de los clusters, un sesgo que el ARI corrige adecuadamente. Ambos escenarios presentan un tamaño mínimo de cluster de 7 empresas, lo cual es comercialmente aceptable pero cercano al límite inferior. En conjunto, los resultados respaldan la solidez de ambos escenarios, con una ligera ventaja estadística para k=6 y una ventaja práctica para k=4 en términos de estabilidad bootstrap e interpretabilidad comercial.
+
+Comparacion:
+ARI values 4-stage outcome
+≥0.90Excellent
+≥0.80Good
+≥0.65Moderate
+<0.65Poor
+
+K-means k=4 vs jerarquico    ARI=0.5239  | Concordancia: POBRE
+K-means k=6 vs jerarquico    ARI=0.6574  | Concordancia: MODERADA
+
+La validación cruzada muestra que k=6 tiene mejor concordancia con el clustering jerárquico (ARI=0.657 vs 0.524) y mayor pureza del cluster más homogéneo (88.9% vs 80.6%). Sin embargo, k=4 ofrece superior estabilidad bootstrap y mejor interpretabilidad comercial, con la ventaja de no presentar clusters tan pequeños. Según la escala validada por Osamor & Osamor (2020) para el Adjusted Rand Index (ARI), k=6 alcanza un nivel de concordancia Moderate (0.657 ≥ 0.65), mientras que k=4 queda en nivel Poor (0.524 < 0.65). Por lo tanto, k=6 es la segmentación recomendada desde la perspectiva de validación externa.
+
+
+## Grafico de barras validacion cruzada
+
+```{r message=FALSE, warning=FALSE}
+# chunk7.2
+# GRÁFICOS DE BARRAS APILADAS - CONCORDANCIA k=4 Y k=6
+# ================================================================================
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Cargar k_optimo_hc si no existe
+if(!exists("k_optimo_hc")) {
+  if(file.exists("checkpoints/k_optimo_hc.rds")) {
+    k_optimo_hc <- readRDS("checkpoints/k_optimo_hc.rds")
+  } else {
+    stop("k_optimo_hc no encontrado. Ejecute primero el chunk 7.1")
+  }
+}
+
+# Verificar que existen las tablas de contingencia
+if(!exists("tabla_k4") || !exists("tabla_k6")) {
+  stop("Ejecute primero el chunk de validación cruzada para generar tabla_k4 y tabla_k6")
+}
+
+if(!exists("ari_k4") || !exists("ari_k6")) {
+  stop("Las variables ari_k4 y ari_k6 no están definidas")
+}
+
+# Función para interpretar ARI según Osamor & Osamor (2020)
+interpretar_ari <- function(ari) {
+  if(ari >= 0.90) return("EXCELENTE")
+  if(ari >= 0.80) return("BUENA")
+  if(ari >= 0.65) return("MODERADA")
+  return("POBRE")
+}
+
+# 1. GRÁFICO DE BARRAS PARA ESCENARIO k=4
+# ------------------------------------------------------------------------------
+
+cat("Generando gráfico de barras apiladas para k=4...\n")
+
+df_barras_k4 <- as.data.frame.matrix(tabla_k4) %>%
+  mutate(KMEANS = rownames(.)) %>%
+  pivot_longer(cols = -KMEANS, names_to = "JERARQUICO", values_to = "Freq") %>%
+  group_by(KMEANS) %>%
+  mutate(porcentaje = Freq / sum(Freq) * 100)
+
+colores_profesionales <- c("#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#6A4C93", "#5D576B", 
+                           "#3C887E", "#9B59B6", "#E67E22")
+
+p_barras_k4 <- ggplot(df_barras_k4, aes(x = KMEANS, y = Freq, fill = JERARQUICO)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.7, alpha = 0.9) +
+  geom_text(aes(label = ifelse(Freq > 0, paste0(Freq, " (", round(porcentaje, 1), "%)"), "")),
+            position = position_fill(vjust = 0.5),
+            color = "white", fontface = "bold", size = 3.5) +
+  scale_fill_manual(values = colores_profesionales[1:length(unique(df_barras_k4$JERARQUICO))],
+                    name = "Cluster Jerárquico") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = paste("CONCORDANCIA: K-MEANS k=4 vs JERÁRQUICO (k =", k_optimo_hc, ")"),
+    subtitle = paste("Cada barra representa un cluster de K-Means y su distribución en el clustering jerárquico",
+                     "\nÍndice de Rand Ajustado (ARI):", round(ari_k4, 3), 
+                     "| Concordancia:", interpretar_ari(ari_k4),
+                     "(Osamor & Osamor, 2020)"),
+    x = "Cluster - Método K-Means (k=4)",
+    y = "Proporción de Empresas"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5, color = "gray30"),
+    axis.title = element_text(face = "bold", size = 11),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(face = "bold", size = 10),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+print(p_barras_k4)
+
+# 2. GRÁFICO DE BARRAS PARA ESCENARIO k=6
+# ------------------------------------------------------------------------------
+
+cat("Generando gráfico de barras apiladas para k=6...\n")
+
+df_barras_k6 <- as.data.frame.matrix(tabla_k6) %>%
+  mutate(KMEANS = rownames(.)) %>%
+  pivot_longer(cols = -KMEANS, names_to = "JERARQUICO", values_to = "Freq") %>%
+  group_by(KMEANS) %>%
+  mutate(porcentaje = Freq / sum(Freq) * 100)
+
+p_barras_k6 <- ggplot(df_barras_k6, aes(x = KMEANS, y = Freq, fill = JERARQUICO)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.7, alpha = 0.9) +
+  geom_text(aes(label = ifelse(Freq > 0, paste0(Freq, " (", round(porcentaje, 1), "%)"), "")),
+            position = position_fill(vjust = 0.5),
+            color = "white", fontface = "bold", size = 3.5) +
+  scale_fill_manual(values = colores_profesionales[1:length(unique(df_barras_k6$JERARQUICO))],
+                    name = "Cluster Jerárquico") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = paste("CONCORDANCIA: K-MEANS k=6 vs JERÁRQUICO (k =", k_optimo_hc, ")"),
+    subtitle = paste("Cada barra representa un cluster de K-Means y su distribución en el clustering jerárquico",
+                     "\nÍndice de Rand Ajustado (ARI):", round(ari_k6, 3), 
+                     "| Concordancia:", interpretar_ari(ari_k6),
+                     "(Osamor & Osamor, 2020)"),
+    x = "Cluster - Método K-Means (k=6)",
+    y = "Proporción de Empresas"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5, color = "gray30"),
+    axis.title = element_text(face = "bold", size = 11),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(face = "bold", size = 10),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+print(p_barras_k6)
+
+# 3. GUARDAR GRÁFICOS
+# ------------------------------------------------------------------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+ggsave("resultados_finales/composicion_segmentos_k4.png", 
+       p_barras_k4, width = 10, height = 6, dpi = 300, bg = "white")
+
+ggsave("resultados_finales/composicion_segmentos_k6.png", 
+       p_barras_k6, width = 12, height = 7, dpi = 300, bg = "white")
+
+cat("\nGráficos guardados en 'resultados_finales/'\n")
+cat("  • composicion_segmentos_k4.png\n")
+cat("  • composicion_segmentos_k6.png\n")
+cat("\nInterpretación ARI según Osamor & Osamor (2020):\n")
+cat("  ≥ 0.90: Excelente | ≥ 0.80: Buena | ≥ 0.65: Moderada | < 0.65: Pobre\n")
+```
+# 8. RESUMEN EJECUTIVO
+
+```{r message=FALSE, warning=FALSE}
+# chunk8.1
+# TARJETA DE RESUMEN EJECUTIVO - COMPARATIVA k=4 Y k=6
+# ================================================================================
+
+cat("TARJETA DE RESUMEN EJECUTIVO\n")
+cat("============================================================================\n\n")
+
+library(gridExtra)
+library(grid)
+
+# Cargar k_optimo_hc si no existe
+if(!exists("k_optimo_hc")) {
+  if(file.exists("checkpoints/k_optimo_hc.rds")) {
+    k_optimo_hc <- readRDS("checkpoints/k_optimo_hc.rds")
+  } else {
+    k_optimo_hc <- 9
+  }
+}
+
+if(!exists("ari_k4") || !exists("ari_k6")) {
+  stop("Las variables ari_k4 y ari_k6 no estan definidas")
+}
+
+if(!exists("datos_completos")) {
+  stop("datos_completos no existe")
+}
+
+if(!exists("tabla_k4") || !exists("tabla_k6")) {
+  stop("Las tablas de contingencia no existen")
+}
+
+# Funcion para interpretar ARI segun Osamor & Osamor (2020)
+interpretar_ari <- function(ari) {
+  if(ari >= 0.90) return("EXCELENTE")
+  if(ari >= 0.80) return("BUENA")
+  if(ari >= 0.65) return("MODERADA")
+  return("POBRE")
+}
+
+# 1. CALCULAR METRICAS ADICIONALES
+# ------------------------------------------------------------------------------
+
+# Identificar clusters mas puros
+max_fila_k4 <- which.max(rowSums(tabla_k4))
+pureza_cluster_k4 <- round(max(tabla_k4[max_fila_k4, ]) / sum(tabla_k4[max_fila_k4, ]) * 100, 1)
+
+max_fila_k6 <- which.max(rowSums(tabla_k6))
+pureza_cluster_k6 <- round(max(tabla_k6[max_fila_k6, ]) / sum(tabla_k6[max_fila_k6, ]) * 100, 1)
+
+# 2. CREAR DATAFRAMES PARA CADA ESCENARIO
+# ------------------------------------------------------------------------------
+
+df_k4 <- data.frame(
+  Metrica = c("ARI", "Interpretacion", "Segmentos", "Referencia", "Cluster mas puro", "Tamano minimo"),
+  Valor = c(
+    round(ari_k4, 3),
+    interpretar_ari(ari_k4),
+    "4 clusters",
+    paste0("Jerarquico (k=", k_optimo_hc, ")"),
+    paste0("Cluster ", max_fila_k4, " (", pureza_cluster_k4, "%)"),
+    paste0(min(table(k4_final$cluster)), " empresas")
+  )
+)
+
+df_k6 <- data.frame(
+  Metrica = c("ARI", "Interpretacion", "Segmentos", "Referencia", "Cluster mas puro", "Tamano minimo"),
+  Valor = c(
+    round(ari_k6, 3),
+    interpretar_ari(ari_k6),
+    "6 clusters",
+    paste0("Jerarquico (k=", k_optimo_hc, ")"),
+    paste0("Cluster ", max_fila_k6, " (", pureza_cluster_k6, "%)"),
+    paste0(min(table(k6_final$cluster)), " empresas")
+  )
+)
+
+# 3. CREAR TABLAS CENTRADAS
+# ------------------------------------------------------------------------------
+
+make_centered_table <- function(df, titulo, color_titulo, color_fondo) {
+  
+  # Tabla base
+  tg <- tableGrob(df, rows = NULL,
+                  theme = ttheme_minimal(
+                    core = list(
+                      fg_params = list(hjust = 0.5, x = 0.5, fontsize = 11),
+                      bg_params = list(fill = c(color_fondo, "white"))
+                    ),
+                    colhead = list(
+                      fg_params = list(fontface = "bold", fontsize = 12, col = color_titulo, hjust = 0.5),
+                      bg_params = list(fill = "#F5F5F5")
+                    )
+                  ))
+  
+  # Titulo
+  title_grob <- textGrob(titulo, 
+                         gp = gpar(fontface = "bold", fontsize = 14, col = color_titulo),
+                         just = "center")
+  
+  # Combinar
+  g <- arrangeGrob(title_grob, tg, ncol = 1, heights = c(0.3, 1))
+  
+  return(g)
+}
+
+tabla_k4_resumen <- make_centered_table(df_k4, "ESCENARIO k = 4", "#2E86AB", "#E8F4F8")
+tabla_k6_resumen <- make_centered_table(df_k6, "ESCENARIO k = 6", "#C73E1D", "#F8E8E8")
+
+# 4. TITULOS Y NOTAS
+# ------------------------------------------------------------------------------
+
+subtitulo <- textGrob("Comparativa de metricas de validacion", 
+                      gp = gpar(fontsize = 13, col = "gray30", fontface = "bold"),
+                      just = "center")
+
+escala_nota <- textGrob("Escala ARI (Osamor & Osamor, 2020): Excelente (>=0.90) | Buena (>=0.80) | Moderada (>=0.65) | Pobre (<0.65)", 
+                        gp = gpar(fontsize = 9, col = "gray50", fontface = "italic"),
+                        just = "center")
+
+# 5. MOSTRAR TARJETAS EN PANTALLA
+# ------------------------------------------------------------------------------
+
+# Layout: fila1 = subtitulo, fila2 = dos tablas, fila3 = nota
+layout_matrix <- rbind(c(1, 1),
+                       c(2, 3),
+                       c(4, 4))
+
+heights <- c(0.3, 3, 0.3)
+
+grid.arrange(subtitulo, tabla_k4_resumen, tabla_k6_resumen, escala_nota,
+             layout_matrix = layout_matrix,
+             heights = heights)
+
+# 6. GUARDAR COMO PNG
+# ------------------------------------------------------------------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+png("resultados_finales/tarjeta_resumen_ejecutivo.png", 
+    width = 800, height = 450, res = 100)
+
+grid.arrange(subtitulo, tabla_k4_resumen, tabla_k6_resumen, escala_nota,
+             layout_matrix = layout_matrix,
+             heights = heights)
+
+dev.off()
+
+cat("\nResumen ejecutivo guardado en 'resultados_finales/tarjeta_resumen_ejecutivo.png'\n")
+
+# 7. RESUMEN EN CONSOLA
+# ------------------------------------------------------------------------------
+
+cat("RESUMEN COMPARATIVO\n")
+cat("============================================================================\n")
+cat("k=4: ARI =", round(ari_k4, 3), "|", interpretar_ari(ari_k4), 
+    "| Cluster mas puro:", pureza_cluster_k4, 
+    "% | Minimo:", min(table(k4_final$cluster)), "empresas\n")
+cat("k=6: ARI =", round(ari_k6, 3), "|", interpretar_ari(ari_k6), 
+    "| Cluster mas puro:", pureza_cluster_k6, 
+    "% | Minimo:", min(table(k6_final$cluster)), "empresas\n")
+cat("============================================================================\n")
+cat("Referencia: Osamor & Osamor (2020). Journal of Big Data, 7, 48.\n")
+```
+
+# 9. GENERACION DEL DOCUMENTO PARA LA TOMA DE DECISIONES
+
+```{r message=FALSE, warning=FALSE}
+# chunk9.1
+# EXPORTAR RESULTADOS - ESCENARIOS k=4 Y k=6
+# ================================================================================
+
+cat("EXPORTAR RESULTADOS DE SEGMENTACIÓN\n")
+cat("Escenarios: k=4 (estabilidad bootstrap) y k=6 (máxima silueta)\n")
+cat("============================================================================\n\n")
+
+# 1. VERIFICAR DATOS DISPONIBLES
+# ------------------------------------------------------------------------------
+
+cat("Verificando objetos en el entorno:\n")
+cat("  • datos_raw:", exists("datos_raw"), "\n")
+cat("  • datos_completos:", exists("datos_completos"), "\n")
+cat("  • k4_km:", exists("k4_km"), "\n")
+cat("  • k6_km:", exists("k6_km"), "\n")
+cat("  • hc_ward:", exists("hc_ward"), "\n\n")
+
+if(!exists("datos_raw")) {
+  stop("datos_raw no encontrado")
+}
+
+if(!exists("k4_km") || !exists("k6_km")) {
+  stop("Ejecute primero los clusterings con k=4 y k=6")
+}
+
+# Cargar k_optimo_hc
+if(!exists("k_optimo_hc")) {
+  if(file.exists("checkpoints/k_optimo_hc.rds")) {
+    k_optimo_hc <- readRDS("checkpoints/k_optimo_hc.rds")
+  } else {
+    k_optimo_hc <- 9
+    cat("Advertencia: k_optimo_hc no encontrado, usando valor por defecto:", k_optimo_hc, "\n")
+  }
+}
+
+# 2. PREPARAR DATAFRAME CON AMBOS ESCENARIOS
+# ------------------------------------------------------------------------------
+
+n_filas <- nrow(datos_raw)
+
+# Obtener clusters de ambos escenarios
+cluster_k4 <- k4_km$cluster
+cluster_k6 <- k6_km$cluster
+
+# Clusters jerárquicos (usando k_optimo_hc)
+if(exists("hc_ward")) {
+  cluster_jerarquico <- cutree(hc_ward, k = k_optimo_hc)
+  cat("Cluster jerárquico obtenido de hc_ward (k =", k_optimo_hc, ")\n")
+} else {
+  cluster_jerarquico <- rep(NA, n_filas)
+  cat("Advertencia: hc_ward no disponible\n")
+}
+
+# 3. CREAR DATAFRAME CON INFORMACIÓN DE EMPRESAS
+# ------------------------------------------------------------------------------
+
+df_decisiones <- data.frame(
+  ID = 1:n_filas,
+  Nombre_Empresa = datos_raw$empresa,
+  stringsAsFactors = FALSE
+)
+
+# Añadir dirección y departamento si existen
+if("Dirección (ubicación)" %in% names(datos_raw)) {
+  df_decisiones$Direccion <- datos_raw$`Dirección (ubicación)`
+} else if("direccion" %in% names(datos_raw)) {
+  df_decisiones$Direccion <- datos_raw$direccion
+} else {
+  df_decisiones$Direccion <- "Sin dirección"
+}
+
+if("Departamento" %in% names(datos_raw)) {
+  df_decisiones$Departamento <- datos_raw$Departamento
+} else if("depto" %in% names(datos_raw)) {
+  df_decisiones$Departamento <- datos_raw$depto
+} else {
+  df_decisiones$Departamento <- "Sin departamento"
+}
+
+# 4. AÑADIR ASIGNACIONES DE CLUSTERS
+# ------------------------------------------------------------------------------
+
+df_decisiones$Cluster_K4 <- cluster_k4
+df_decisiones$Cluster_K6 <- cluster_k6
+df_decisiones$Cluster_Jerarquico <- cluster_jerarquico
+
+# 5. AÑADIR MÉTRICAS DE CALIDAD POR EMPRESA
+# ------------------------------------------------------------------------------
+
+if(exists("datos_cluster")) {
+  dist_matrix <- dist(datos_cluster)
+  sil_k4 <- silhouette(cluster_k4, dist_matrix)
+  sil_k6 <- silhouette(cluster_k6, dist_matrix)
+  
+  df_decisiones$Silueta_K4 <- round(sil_k4[, 3], 4)
+  df_decisiones$Silueta_K6 <- round(sil_k6[, 3], 4)
+}
+
+# 6. ORDENAR POR CLUSTER PARA MEJOR LECTURA
+# ------------------------------------------------------------------------------
+
+df_decisiones <- df_decisiones %>%
+  arrange(Cluster_K4, Cluster_K6)
+
+# 7. MOSTRAR VISTA PREVIA
+# ------------------------------------------------------------------------------
+
+cat("\nDATAFRAME DE DECISIONES CREADO:\n")
+cat("  • Dimensiones:", nrow(df_decisiones), "filas x", ncol(df_decisiones), "columnas\n")
+cat("  • Columnas:", paste(names(df_decisiones), collapse = ", "), "\n")
+
+cat("\nVISTA PREVIA (primeras 10 filas):\n")
+print(head(df_decisiones, 10))
+
+cat("\nRESUMEN DE ASIGNACIONES:\n")
+cat("  k=4:\n")
+print(table(df_decisiones$Cluster_K4))
+cat("\n  k=6:\n")
+print(table(df_decisiones$Cluster_K6))
+
+# 8. EXPORTAR A EXCEL CON MÚLTIPLES HOJAS
+# ------------------------------------------------------------------------------
+
+if(!require("openxlsx")) install.packages("openxlsx")
+library(openxlsx)
+
+wb <- createWorkbook()
+
+# Hoja 1: Asignaciones completas
+addWorksheet(wb, "Asignaciones_por_Empresa")
+writeData(wb, "Asignaciones_por_Empresa", df_decisiones)
+
+# Hoja 2: Resumen por cluster k=4
+resumen_k4 <- df_decisiones %>%
+  group_by(Cluster_K4) %>%
+  summarise(
+    N = n(),
+    Porcentaje = round(n() / nrow(df_decisiones) * 100, 1),
+    Silueta_promedio = round(mean(Silueta_K4, na.rm = TRUE), 4),
+    Empresas = paste(Nombre_Empresa, collapse = ", ")
+  )
+
+addWorksheet(wb, "Resumen_k4")
+writeData(wb, "Resumen_k4", resumen_k4)
+
+# Hoja 3: Resumen por cluster k=6
+resumen_k6 <- df_decisiones %>%
+  group_by(Cluster_K6) %>%
+  summarise(
+    N = n(),
+    Porcentaje = round(n() / nrow(df_decisiones) * 100, 1),
+    Silueta_promedio = round(mean(Silueta_K6, na.rm = TRUE), 4),
+    Empresas = paste(Nombre_Empresa, collapse = ", ")
+  )
+
+addWorksheet(wb, "Resumen_k6")
+writeData(wb, "Resumen_k6", resumen_k6)
+
+# Hoja 4: Comparativa de métodos (actualizada con k_optimo_hc)
+if(exists("ari_k4") && exists("ari_k6")) {
+  comparativa <- data.frame(
+    Metodo = c("K-means k=4", "K-means k=6", paste0("Jerárquico (k=", k_optimo_hc, ")")),
+    Clusters = c(4, 6, k_optimo_hc),
+    Silueta_promedio = c(
+      round(mean(sil_k4[, 3]), 4),
+      round(mean(sil_k6[, 3]), 4),
+      round(mean(silhouette(cluster_jerarquico, dist_matrix)[, 3]), 4)
+    ),
+    ARI_vs_Jerarquico = c(round(ari_k4, 4), round(ari_k6, 4), NA),
+    Tamano_minimo = c(
+      min(table(df_decisiones$Cluster_K4)), 
+      min(table(df_decisiones$Cluster_K6)),
+      min(table(df_decisiones$Cluster_Jerarquico))
+    ),
+    Tamano_maximo = c(
+      max(table(df_decisiones$Cluster_K4)),
+      max(table(df_decisiones$Cluster_K6)),
+      max(table(df_decisiones$Cluster_Jerarquico))
+    )
+  )
+} else {
+  comparativa <- data.frame(
+    Metodo = c("K-means k=4", "K-means k=6", paste0("Jerárquico (k=", k_optimo_hc, ")")),
+    Clusters = c(4, 6, k_optimo_hc),
+    Tamano_minimo = c(
+      min(table(df_decisiones$Cluster_K4)), 
+      min(table(df_decisiones$Cluster_K6)),
+      min(table(df_decisiones$Cluster_Jerarquico))
+    ),
+    Tamano_maximo = c(
+      max(table(df_decisiones$Cluster_K4)),
+      max(table(df_decisiones$Cluster_K6)),
+      max(table(df_decisiones$Cluster_Jerarquico))
+    )
+  )
+}
+
+addWorksheet(wb, "Comparativa")
+writeData(wb, "Comparativa", comparativa)
+
+# Hoja 5: Resumen ejecutivo (nueva)
+if(exists("ari_k4") && exists("ari_k6")) {
+  interpretar_ari <- function(ari) {
+    if(ari >= 0.90) return("EXCELENTE")
+    if(ari >= 0.80) return("BUENA")
+    if(ari >= 0.65) return("MODERADA")
+    return("POBRE")
+  }
+  
+  resumen_ejecutivo <- data.frame(
+    Escenario = c("k=4", "k=6"),
+    ARI = c(round(ari_k4, 4), round(ari_k6, 4)),
+    Interpretacion_ARI = c(interpretar_ari(ari_k4), interpretar_ari(ari_k6)),
+    Silueta_promedio = c(round(mean(sil_k4[, 3]), 4), round(mean(sil_k6[, 3]), 4)),
+    Cluster_mas_puro = c(
+      paste(which.max(table(df_decisiones$Cluster_K4)), 
+            "(", round(max(table(df_decisiones$Cluster_K4))/nrow(df_decisiones)*100, 1), "%)"),
+      paste(which.max(table(df_decisiones$Cluster_K6)), 
+            "(", round(max(table(df_decisiones$Cluster_K6))/nrow(df_decisiones)*100, 1), "%)")
+    )
+  )
+  
+  addWorksheet(wb, "Resumen_Ejecutivo")
+  writeData(wb, "Resumen_Ejecutivo", resumen_ejecutivo)
+  
+  # Nota explicativa
+  nota <- data.frame(
+    Nota = c("Escala ARI utilizada: Osamor & Osamor (2020). Journal of Big Data, 7, 48.",
+             "Excelente (>=0.90) | Buena (>=0.80) | Moderada (>=0.65) | Pobre (<0.65)")
+  )
+  addWorksheet(wb, "Nota")
+  writeData(wb, "Nota", nota)
+}
+
+# 9. GUARDAR ARCHIVO
+# ------------------------------------------------------------------------------
+
+if(!dir.exists("resultados_finales")) dir.create("resultados_finales")
+
+saveWorkbook(wb, "resultados_finales/Resultado_toma_decisiones_k4_k6.xlsx", overwrite = TRUE)
+
+cat("\nARCHIVO GUARDADO EN: resultados_finales/Resultado_toma_decisiones_k4_k6.xlsx\n")
+cat("\nEl archivo contiene las siguientes hojas:\n")
+cat("  • Asignaciones_por_Empresa - Clusters asignados a cada empresa\n")
+cat("  • Resumen_k4 - Agrupación por cluster (k=4)\n")
+cat("  • Resumen_k6 - Agrupación por cluster (k=6)\n")
+cat("  • Comparativa - Métricas comparativas entre métodos\n")
+if(exists("ari_k4") && exists("ari_k6")) {
+  cat("  • Resumen_Ejecutivo - Métricas clave de calidad\n")
+  cat("  • Nota - Escala de interpretación ARI (Osamor & Osamor, 2020)\n")
+}
+```
+
